@@ -74,7 +74,8 @@ struct RequestInjectionData {
   // Set by the debugger hook handler to force function entry/exit events
   static const ssize_t DebuggerHookFlag     = 1 << 9;
   static const ssize_t CPUTimedOutFlag      = 1 << 10;
-  static const ssize_t LastFlag             = CPUTimedOutFlag;
+  static const ssize_t GarbageCollectFlag   = 1 << 11;
+  static const ssize_t LastFlag             = GarbageCollectFlag;
   // flags that shouldn't be cleared by fetchAndClearFlags, because:
   // fetchAndClearFlags is only supposed to touch flags related to PHP-visible
   // signals/exceptions and resource limits
@@ -302,6 +303,8 @@ private:
   void setXenonSignalFlag();
   void clearXenonSignalFlag();
   void setDebuggerSignalFlag();
+  void setGarbageCollectionFlag();
+  void clearGarbageCollectionFlag();
   ssize_t fetchAndClearFlags();
 
   inline bool checkXenonSignalFlag() {

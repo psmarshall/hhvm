@@ -544,6 +544,15 @@ void RequestInjectionData::setDebuggerSignalFlag() {
   getConditionFlags()->fetch_or(RequestInjectionData::DebuggerSignalFlag);
 }
 
+void RequestInjectionData::setGarbageCollectionFlag() {
+  getConditionFlags()->fetch_or(RequestInjectionData::GarbageCollectFlag);
+}
+
+void RequestInjectionData::clearGarbageCollectionFlag() {
+  getConditionFlags()->fetch_and(~RequestInjectionData::GarbageCollectFlag);
+}
+
+
 ssize_t RequestInjectionData::fetchAndClearFlags() {
   return getConditionFlags()->fetch_and(RequestInjectionData::StickyFlags);
 }

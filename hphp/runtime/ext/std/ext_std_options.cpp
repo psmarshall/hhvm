@@ -37,6 +37,7 @@
 #include "hphp/runtime/base/request-local.h"
 #include "hphp/runtime/base/runtime-error.h"
 #include "hphp/runtime/base/runtime-option.h"
+#include "hphp/runtime/base/tracing-collector.h"
 #include "hphp/runtime/base/unit-cache.h"
 #include "hphp/runtime/base/zend-functions.h"
 #include "hphp/runtime/base/zend-string.h"
@@ -1185,6 +1186,10 @@ static int64_t HHVM_FUNCTION(gc_collect_cycles) {
   }
   return 0;
 }
+
+static void HHVM_FUNCTION(gc_collect) {
+  requestGC();
+}
 ///////////////////////////////////////////////////////////////////////////////
 
 void StandardExtension::initOptions() {
@@ -1238,6 +1243,7 @@ void StandardExtension::initOptions() {
   HHVM_FE(gc_enable);
   HHVM_FE(gc_disable);
   HHVM_FE(gc_collect_cycles);
+  HHVM_FE(gc_collect);
 
 #define INFO(v) Native::registerConstant<KindOfInt64> \
                   (makeStaticString("INFO_" #v), k_INFO_##v);
