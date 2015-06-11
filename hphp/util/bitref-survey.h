@@ -34,6 +34,7 @@ public:
   void cow_check_occurred(const ArrayData* ad);
   void cow_check_occurred(const StringData* sd);
 
+  BitrefSurvey();
   ~BitrefSurvey();
 
 private:

@@ -30,15 +30,22 @@
 #include "folly/stats/Histogram-defs.h"
 #include <mutex>
 
+#include <execinfo.h>
+
 namespace HPHP {
 
 ///////////////////////////////////////////////////////////////////////////////
 
 uint64_t arr_empty_count, arr_rc_empty_count, arr_bitref_empty_count, arr_rc_size,
-  arr_bitref_size, arr_bcow_size, str_empty_count;
+  arr_bitref_size, arr_bcow_size, str_empty_count, dumb_counter;
 std::mutex m;
 folly::Histogram<uint32_t> str_rc_copy_histogram(8, 1, 2048);
 folly::Histogram<uint32_t> arr_rc_copy_histogram(8, 1, 2048);
+std::stringstream log_string;
+
+FILE *log_fp;
+void **trace_buffer;
+const int trace_buffer_size = 2;
 
 uint64_t arr_rc_type_count[ArrayData::kNumKinds];
 uint64_t arr_bitref_type_count[ArrayData::kNumKinds];
@@ -46,6 +53,11 @@ uint64_t arr_bitref_type_count[ArrayData::kNumKinds];
 inline BitrefSurvey &survey() {
   static BitrefSurvey survey;
   return survey;
+}
+
+BitrefSurvey::BitrefSurvey() {
+  log_fp = fopen("/tmp/hphp_mrb.log", "a");
+  trace_buffer = (void **) malloc(trace_buffer_size * sizeof(void *));
 }
 
 /*
@@ -132,17 +144,39 @@ void BitrefSurvey::cow_check_occurred(const ArrayData* ad) {
 
     arr_bitref_type_count[ad->m_kind]++;
 
+    uint64_t ad_heap_size = 0;
+
     if (ad->isPacked()) {
-      arr_bitref_size += ((PackedArray*)ad)->heapSize(ad);
+      ad_heap_size = ((PackedArray*)ad)->heapSize(ad);
     } else if (ad->isStruct()) {
-      arr_bitref_size += ((StructArray*)ad)->heapSize(ad);
+      ad_heap_size = ((StructArray*)ad)->heapSize(ad);
     } else if (ad->isMixed()) {
-      arr_bitref_size += ((MixedArray*)ad)->heapSize();
+      ad_heap_size = ((MixedArray*)ad)->heapSize();
     } else if (ad->isEmptyArray()) {
-      arr_bitref_size += sizeof(EmptyArray);
+      ad_heap_size = sizeof(EmptyArray);
     } else if (ad->isApcArray()) {
-      arr_bitref_size += getMemSize(ad);
+      ad_heap_size = getMemSize(ad);
     }
+    arr_bitref_size += ad_heap_size;
+
+    if (ad->getCount() == 1) {
+      dumb_counter++;
+      if (dumb_counter % 140 == 0) {
+        // Only the *extra* copies caused by MRB
+        
+        int trace_size = backtrace(trace_buffer, trace_buffer_size);
+        // get backtrace symbols
+        char **trace_symbols = backtrace_symbols(trace_buffer, trace_size);
+
+        // print array info and calling function to file
+        //fprintf(log_fp, "%8ld %s\n", ad_heap_size, ArrayData::kindToString(ad->m_kind));
+        fprintf(log_fp, "\t%s\n", trace_symbols[1]);
+        //log_string << std::string(trace_symbols[1]) << std::endl;
+
+        free(trace_symbols);
+      }
+    }
+
   }
 
   // heap size of copies for blind cow
@@ -183,62 +217,64 @@ BitrefSurvey::~BitrefSurvey() {
   double bitref_copy_pc = ((double)bitref_copy_count / (double)rc_copy_count) * 100;
   double arr_bitref_copy_pc = ((double)arr_bitref_copy_count / (double)arr_rc_copy_count) * 100;
   double str_bitref_copy_pc = ((double)str_bitref_copy_count / (double)str_rc_copy_count) * 100;
-  
-  FILE *fp = fopen("/tmp/hphp_mrb.log", "a");
 
-  fprintf(fp, "     ||    # rc copies   |   # 1bit copies    |    blind CoW        \n");
-  fprintf(fp, "     ||   all   | static |  (incl. rc copies) |                     \n");
-  fprintf(fp, "--------------------------------------------------------------------\n");
+  fprintf(log_fp, "     ||    # rc copies   |   # 1bit copies    |    blind CoW        \n");
+  fprintf(log_fp, "     ||   all   | static |  (incl. rc copies) |                     \n");
+  fprintf(log_fp, "--------------------------------------------------------------------\n");
 
-  fprintf(fp, " all ||%9ld|%8ld|%9ld (%7.2f%%)|%10ld (%7.2f%%)\n", 
+  fprintf(log_fp, " all ||%9ld|%8ld|%9ld (%7.2f%%)|%10ld (%7.2f%%)\n", 
     rc_copy_count, static_count, bitref_copy_count, bitref_copy_pc,
     check_count, bcow_copy_pc);
 
-  fprintf(fp, " arr ||%9ld|%8ld|%9ld (%7.2f%%)|%10ld (%7.2f%%)\n", 
+  fprintf(log_fp, " arr ||%9ld|%8ld|%9ld (%7.2f%%)|%10ld (%7.2f%%)\n", 
     arr_rc_copy_count, arr_static_count, arr_bitref_copy_count, 
     arr_bitref_copy_pc, arr_check_count, arr_bcow_copy_pc);
 
-  fprintf(fp, " str ||%9ld|%8ld|%9ld (%7.2f%%)|%10ld (%7.2f%%)\n",
+  fprintf(log_fp, " str ||%9ld|%8ld|%9ld (%7.2f%%)|%10ld (%7.2f%%)\n",
     str_rc_copy_count, str_static_count, str_bitref_copy_count, 
     str_bitref_copy_pc, str_check_count, str_bcow_copy_pc);
 
-  fprintf(fp, "--------------------------------------------------------------------\n");
-  fprintf(fp, "# []:  %9ld|        |%9ld           |%10ld        \n",
+  fprintf(log_fp, "--------------------------------------------------------------------\n");
+  fprintf(log_fp, "# []:  %9ld|        |%9ld           |%10ld        \n",
       arr_rc_empty_count, arr_bitref_empty_count, arr_empty_count);
-  fprintf(fp, "Array heap size: rc:%8.2fMB 1bit:%9.2fMB bcow:%10.2fMB\n",
+  fprintf(log_fp, "Array heap size: rc:%8.2fMB 1bit:%9.2fMB bcow:%10.2fMB\n",
     (double)arr_rc_size/1000000, (double)arr_bitref_size/1000000, (double)arr_bcow_size/1000000);
 
-  fprintf(fp, "Array kind:\t\tRC \t\t\t1BIT\n");
+  fprintf(log_fp, "Array kind:\t\tRC \t\t\t1BIT\n");
   for (int i = 0; i < ArrayData::kNumKinds; i++) {
-    fprintf(fp, "\t%s\t:%9ld\t%9ld\n", ArrayData::kindToString((ArrayData::ArrayKind)i),
+    fprintf(log_fp, "\t%s\t:%9ld\t%9ld\n", ArrayData::kindToString((ArrayData::ArrayKind)i),
       arr_rc_type_count[i], arr_bitref_type_count[i]);
   }
-  fprintf(fp, "# \"\": %8ld (%5.2f%% of rc string copies, %5.2f%% of 1bit string copies)\n",
+  fprintf(log_fp, "# \"\": %8ld (%5.2f%% of rc string copies, %5.2f%% of 1bit string copies)\n",
       str_empty_count,
       ((double)str_empty_count / (double)str_rc_copy_count) * 100,
       ((double)str_empty_count / (double)str_bitref_copy_count) * 100);
   
-  fprintf(fp, "--------------------------------------------------------------------\n");
+  fprintf(log_fp, "--------------------------------------------------------------------\n");
+
+  //auto output = log_string.str();
+
+  //fprintf(log_fp, "%s\n", output.c_str());
   
   /*unsigned int numBuckets = str_rc_copy_histogram.getNumBuckets();
-  fprintf(fp, "String length:    0-   0 %8lu\n", str_rc_copy_histogram.getBucketByIndex(0).count);
+  fprintf(log_fp, "String length:    0-   0 %8lu\n", str_rc_copy_histogram.getBucketByIndex(0).count);
   for (unsigned int n = 1; n < numBuckets - 1; n++) {
-    fprintf(fp, "               %4u-%4u %8lu\n", str_rc_copy_histogram.getBucketMin(n),
+    fprintf(log_fp, "               %4u-%4u %8lu\n", str_rc_copy_histogram.getBucketMin(n),
         str_rc_copy_histogram.getBucketMax(n), str_rc_copy_histogram.getBucketByIndex(n).count);
   }
-  fprintf(fp, "               2048+     %8lu\n", str_rc_copy_histogram.getBucketByIndex(numBuckets - 1).count);
+  fprintf(log_fp, "               2048+     %8lu\n", str_rc_copy_histogram.getBucketByIndex(numBuckets - 1).count);
   
-  fprintf(fp, "--------------------------------------------------------------------------------\n");
+  fprintf(log_fp, "--------------------------------------------------------------------------------\n");
 
   numBuckets = arr_rc_copy_histogram.getNumBuckets();
-  fprintf(fp, "Array length :    0-   0 %8lu\n", arr_rc_copy_histogram.getBucketByIndex(0).count);
+  fprintf(log_fp, "Array length :    0-   0 %8lu\n", arr_rc_copy_histogram.getBucketByIndex(0).count);
   for (unsigned int n = 1; n < numBuckets - 1; n++) {
-    fprintf(fp, "               %4u-%4u %8lu\n", arr_rc_copy_histogram.getBucketMin(n),
+    fprintf(log_fp, "               %4u-%4u %8lu\n", arr_rc_copy_histogram.getBucketMin(n),
         arr_rc_copy_histogram.getBucketMax(n), arr_rc_copy_histogram.getBucketByIndex(n).count);
   }
-  fprintf(fp, "               2048+     %8lu\n", arr_rc_copy_histogram.getBucketByIndex(numBuckets - 1).count);
+  fprintf(log_fp, "               2048+     %8lu\n", arr_rc_copy_histogram.getBucketByIndex(numBuckets - 1).count);
 
-  fprintf(fp, "\n");*/
+  fprintf(log_fp, "\n");*/
   /*
   check_count = 0;
   arr_check_count = 0;
@@ -258,8 +294,8 @@ BitrefSurvey::~BitrefSurvey() {
 
   arr_kEmptyKind_count = 0;
   */
-
-  fclose(fp);
+  free(trace_buffer);
+  fclose(log_fp);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
