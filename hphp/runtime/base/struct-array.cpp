@@ -35,6 +35,7 @@ StructArray::StructArray(
 {
   m_sizeAndPos = size | uint64_t{pos} << 32;
   m_kindAndCount = kStructKind << 24 | uint64_t{count} << 32;
+  m_pad = (count > 1 ? 1 : 0);
   assert(m_pos == pos);
   assert(m_size == size);
   assert(m_kind == kStructKind);
@@ -97,6 +98,7 @@ ArrayData* StructArray::MakeUncounted(ArrayData* array) {
   auto size = structArray->size();
   StructArray* result = createUncounted(structArray->shape(), size);
   result->m_kindAndCount = kStructKind << 24 | int64_t{UncountedValue} << 32;
+  result->m_pad = 1;
   result->m_sizeAndPos = array->m_sizeAndPos;
   auto const srcData = structArray->data();
   auto const stop    = srcData + size;
@@ -108,6 +110,7 @@ ArrayData* StructArray::MakeUncounted(ArrayData* array) {
   }
   assert(result->m_pos == structArray->m_pos);
   assert(result->m_count == UncountedValue);
+  assert(result->m_pad == 1);
   assert(result->isUncounted());
   return result;
 }
@@ -409,6 +412,7 @@ ArrayData* StructArray::Copy(const ArrayData* ad) {
   auto result = StructArray::createNoCopy(shape, shape->size());
   result->m_pos = old->m_pos;
   result->m_count = 0;
+  result->m_pad = 0;
 
   assert(result->m_size == result->shape()->size());
   assert(result->size() == old->size());
@@ -574,6 +578,7 @@ StructArray* StructArray::Grow(StructArray* old, Shape* newShape) {
     old->shape()->size());
   result->m_size = newShape->size();
   result->m_count = 0;
+  result->m_pad = 0;
 
   if (UNLIKELY(strong_iterators_exist())) {
     move_strong_iterators(result, old);
@@ -596,6 +601,7 @@ MixedArray* StructArray::ToMixedHeader(size_t neededSize) {
 
   ad->m_sizeAndPos       = 0; // We'll set size and pos later.
   ad->m_kindAndCount     = MixedArray::kMixedKind << 24; // count=0
+  ad->m_pad              = 0;
   ad->m_mask_used        = mask; // used=0
   ad->m_nextKI           = 0; // There were never any numeric indices.
 
@@ -603,6 +609,7 @@ MixedArray* StructArray::ToMixedHeader(size_t neededSize) {
   assert(ad->m_size == 0);
   assert(ad->m_pos == 0);
   assert(ad->m_count == 0);
+  assert(ad->m_pad == 0);
   assert(ad->m_used == 0);
   assert(ad->m_mask == mask);
   assert(ad->capacity() == cap);
@@ -664,6 +671,7 @@ MixedArray* StructArray::ToMixedCopyReserve(
   assert(neededSize >= old->size());
   auto const ad      = ToMixedHeader(neededSize);
   ad->m_count        = 1;
+  ad->m_pad          = 0;
   auto const oldSize = old->size();
   auto const srcData = old->data();
   auto shape         = old->shape();

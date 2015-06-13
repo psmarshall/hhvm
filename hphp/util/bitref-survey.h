@@ -64,7 +64,7 @@ void cow_check_occurred(const StringData* sd);
 
 BitrefSurvey &survey();
 
-const bool BITREF_SURVEY = true;
+const bool BITREF_SURVEY = false;
 
 ///////////////////////////////////////////////////////////////////////////////
 

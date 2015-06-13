@@ -69,6 +69,7 @@ MixedArray* PackedArray::ToMixedHeader(const ArrayData* old,
 
   ad->m_sizeAndPos       = oldSize | int64_t{old->m_pos} << 32;
   ad->m_kindAndCount     = ArrayData::kMixedKind << 24; // capcode=0, count=0
+  ad->m_pad = 0;
   ad->m_mask_used        = mask | uint64_t{oldSize} << 32; // used=oldSize
   ad->m_nextKI           = oldSize;
 
@@ -76,6 +77,7 @@ MixedArray* PackedArray::ToMixedHeader(const ArrayData* old,
   assert(ad->m_size == oldSize);
   assert(ad->m_pos == old->m_pos);
   assert(ad->m_count == 0);
+  assert(ad->m_pad == 0);
   assert(ad->m_used == oldSize);
   assert(ad->capacity() == cap);
   assert(ad->m_mask == mask);
@@ -214,6 +216,7 @@ ArrayData* PackedArray::Grow(ArrayData* old) {
     assert(cap == CapCode::ceil(cap).code);
     ad->m_sizeAndPos = old->m_sizeAndPos;
     ad->m_kindAndCount = cap | uint64_t{old->m_kind} << 24; // count=0
+    ad->m_pad = 0;
     assert(ad->isPacked());
     assert(ad->m_size == old->m_size);
     assert(ad->m_cap.decode() == cap);
@@ -243,6 +246,7 @@ ArrayData* PackedArray::Grow(ArrayData* old) {
 
   assert(ad->m_pos == oldPos);
   assert(ad->m_count == 0);
+  assert(ad->m_pad == 0);
   assert(checkInvariants(ad));
   return ad;
 }
@@ -328,6 +332,7 @@ ArrayData* PackedArray::Copy(const ArrayData* adIn) {
   auto const size = adIn->m_size;
   ad->m_sizeAndPos = adIn->m_sizeAndPos; // copy size, pos=0
   ad->m_kindAndCount = adIn->m_cap_kind; // copy cap_kind, count=0
+  ad->m_pad = 0;
 
   auto const srcData = packedData(adIn);
   auto const stop    = srcData + size;
@@ -341,6 +346,7 @@ ArrayData* PackedArray::Copy(const ArrayData* adIn) {
   assert(ad->m_size == size);
   assert(ad->m_pos == adIn->m_pos);
   assert(ad->m_count == 0);
+  assert(ad->m_pad == 0);
   assert(checkInvariants(ad));
   return ad;
 }
@@ -368,6 +374,7 @@ ArrayData* PackedArray::NonSmartCopy(const ArrayData* adIn) {
     assert(cap == CapCode::ceil(cap).code);
     ad->m_sizeAndPos = adIn->m_sizeAndPos;
     ad->m_kindAndCount = cap; // kind=0, count=0
+    ad->m_pad = 0;
     assert(ad->isPacked());
     assert(ad->m_cap.decode() == cap);
     assert(ad->m_size == adIn->m_size);
@@ -385,6 +392,7 @@ ArrayData* PackedArray::NonSmartCopy(const ArrayData* adIn) {
 
   assert(ad->m_pos == adIn->m_pos);
   assert(ad->m_count == 0);
+  assert(ad->m_pad == 0);
   assert(checkInvariants(ad));
   return ad;
 }
@@ -398,6 +406,7 @@ ArrayData* PackedArray::NonSmartCopyHelper(const ArrayData* adIn) {
   );
   ad->m_sizeAndPos = adIn->m_sizeAndPos;
   ad->m_kindAndCount = fpcap.code; // kind=0, count=0
+  ad->m_pad = 0;
   assert(ad->isPacked());
   assert(ad->m_cap.decode() == cap);
   assert(ad->m_size == adIn->m_size);
@@ -416,6 +425,7 @@ ArrayData* PackedArray::NonSmartConvert(const ArrayData* arr) {
     assert(cap == CapCode::ceil(cap).code);
     ad->m_sizeAndPos = arr->m_sizeAndPos;
     ad->m_kindAndCount = cap; // kind=0, cap=0
+    ad->m_pad = 0;
     assert(ad->isPacked());
     assert(ad->m_cap.decode() == cap);
     assert(ad->m_size == arr->m_size);
@@ -431,6 +441,7 @@ ArrayData* PackedArray::NonSmartConvert(const ArrayData* arr) {
 
   assert(ad->m_pos == arr->m_pos);
   assert(ad->m_count == 0);
+  assert(ad->m_pad == 0);
   assert(checkInvariants(ad));
   return ad;
 }
@@ -444,6 +455,7 @@ ArrayData* PackedArray::NonSmartConvertHelper(const ArrayData* arr) {
   );
   ad->m_sizeAndPos = arr->m_sizeAndPos;
   ad->m_kindAndCount = fpcap.code; // kind=0, count=0
+  ad->m_pad = 0;
   assert(ad->isPacked());
   assert(ad->m_cap.decode() == cap);
   assert(ad->m_size == arr->m_size);
@@ -461,6 +473,7 @@ ArrayData* MixedArray::MakeReserve(uint32_t capacity) {
     assert(cap == CapCode::ceil(cap).code);
     ad->m_sizeAndPos = 0; // size=0, pos=0
     ad->m_kindAndCount = cap | uint64_t{1} << 32; // kind=0, count=1
+    ad->m_pad = 0;
     assert(ad->isPacked());
     assert(ad->m_cap.decode() == cap);
     assert(ad->m_size == 0);
@@ -470,6 +483,7 @@ ArrayData* MixedArray::MakeReserve(uint32_t capacity) {
   }
 
   assert(ad->m_count == 1);
+  assert(ad->m_pad == 0);
   assert(ad->m_pos == 0);
   assert(PackedArray::checkInvariants(ad));
   return ad;
@@ -483,6 +497,7 @@ ArrayData* MixedArray::MakeReserveSlow(uint32_t capacity) {
   auto const ad = static_cast<ArrayData*>(MM().objMallocLogged(requestSize));
   ad->m_sizeAndPos = 0;
   ad->m_kindAndCount = fpcap.code; // kind=0, count=0
+  ad->m_pad = 0;
   assert(ad->isPacked());
   assert(ad->m_cap.decode() == cap);
   assert(ad->m_size == 0);

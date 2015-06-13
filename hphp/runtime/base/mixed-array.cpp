@@ -57,6 +57,7 @@ ArrayData* MixedArray::MakeReserveMixed(uint32_t capacity) {
 
   ad->m_sizeAndPos   = 0; // size=0, pos=0
   ad->m_kindAndCount = kMixedKind << 24 | uint64_t{1} << 32; // count=1
+  ad->m_pad          = 0;
   ad->m_mask_used    = mask; // used=0
   ad->m_nextKI       = 0;
 
@@ -68,6 +69,7 @@ ArrayData* MixedArray::MakeReserveMixed(uint32_t capacity) {
   assert(ad->m_size == 0);
   assert(ad->m_pos == 0);
   assert(ad->m_count == 1);
+  assert(ad->m_pad == 0);
   assert(ad->m_used == 0);
   assert(ad->m_nextKI == 0);
   assert(ad->m_mask == mask);
@@ -101,6 +103,7 @@ ArrayData* MixedArray::MakePacked(uint32_t size, const TypedValue* values) {
     assert(cap == CapCode::ceil(cap).code);
     ad->m_sizeAndPos = size; // pos=0
     ad->m_kindAndCount = cap | uint64_t{1} << 32; // kind=0, count=1
+    ad->m_pad = 0;
     assert(ad->m_kind == kPackedKind);
     assert(ad->m_size == size);
     assert(cap == ad->m_cap.decode());
@@ -121,6 +124,7 @@ ArrayData* MixedArray::MakePacked(uint32_t size, const TypedValue* values) {
 
   assert(ad->m_pos == 0);
   assert(ad->m_count == 1);
+  assert(ad->m_pad == 0);
   assert(PackedArray::checkInvariants(ad));
   return ad;
 }
@@ -129,6 +133,7 @@ NEVER_INLINE ArrayData*
 MixedArray::MakePackedHelper(uint32_t size, const TypedValue* values) {
   auto const ad = MakeReserveSlow(size); // size=pos=count=kind=0
   ad->m_count = 1;
+  ad->m_pad = 0; // just in case?
   assert(ad->m_kind == kPackedKind);
   assert(ad->m_size == size);
   assert(ad->m_cap.decode() >= size);
@@ -146,11 +151,13 @@ ArrayData* MixedArray::MakePackedUninitialized(uint32_t size) {
   assert(cap == CapCode::ceil(cap).code);
   ad->m_sizeAndPos = size; // pos=0
   ad->m_kindAndCount = cap | uint64_t{1} << 32; // kind=0, count=1
+  ad->m_pad = 0;
   assert(ad->m_kind == kPackedKind);
   assert(ad->m_size == size);
   assert(ad->m_cap.decode() == cap);
   assert(ad->m_pos == 0);
   assert(ad->m_count == 1);
+  assert(ad->m_pad == 0);
   assert(PackedArray::checkInvariants(ad));
   return ad;
 }
@@ -166,6 +173,7 @@ MixedArray* MixedArray::MakeStruct(uint32_t size, StringData** keys,
 
   ad->m_sizeAndPos       = size; // pos=0
   ad->m_kindAndCount     = kMixedKind << 24 | uint64_t{1} << 32; // count=1
+  ad->m_pad = 0;
   ad->m_mask_used        = mask | uint64_t{size} << 32; // used=size
   ad->m_nextKI           = 0;
 
@@ -192,6 +200,7 @@ MixedArray* MixedArray::MakeStruct(uint32_t size, StringData** keys,
   assert(ad->m_size == size);
   assert(ad->m_pos == 0);
   assert(ad->m_count == 1);
+  assert(ad->m_pad == 0);
   assert(ad->capacity() == cap);
   assert(ad->m_used == size);
   assert(ad->m_nextKI == 0);
@@ -230,6 +239,7 @@ MixedArray* MixedArray::CopyMixed(const MixedArray& other,
 
   ad->m_sizeAndPos      = other.m_sizeAndPos;
   ad->m_kindAndCount    = other.m_cap_kind; // copy cap_kind; count=0
+  ad->m_pad             = 0;
   ad->m_mask_used       = other.m_mask_used;
   ad->m_nextKI          = other.m_nextKI;
 
@@ -265,6 +275,7 @@ MixedArray* MixedArray::CopyMixed(const MixedArray& other,
   assert(ad->m_size == other.m_size);
   assert(ad->m_pos == other.m_pos);
   assert(ad->m_count == 0);
+  assert(ad->m_pad == 0);
   assert(ad->m_mask == mask);
   assert(ad->checkInvariants());
   return ad;
@@ -405,6 +416,7 @@ ArrayData* MixedArray::MakeUncountedPacked(ArrayData* array) {
     assert(cap == CapCode::ceil(cap).code);
     ad->m_sizeAndPos = array->m_sizeAndPos;
     ad->m_kindAndCount = cap | int64_t{UncountedValue} << 32; // kind=0
+    ad->m_pad = 0;
     assert(ad->m_kind == ArrayData::kPackedKind);
     assert(ad->m_cap.decode() == cap);
     assert(ad->m_size == size);
@@ -434,6 +446,7 @@ ArrayData* MixedArray::MakeUncountedPackedHelper(ArrayData* array) {
   );
   ad->m_sizeAndPos = array->m_sizeAndPos;
   ad->m_kindAndCount = fpcap.code | int64_t{UncountedValue} << 32;
+  ad->m_pad = 0;
   assert(ad->m_kind == ArrayData::kPackedKind);
   assert(ad->m_cap.decode() == cap);
   assert(ad->m_size == array->m_size);
@@ -1044,6 +1057,7 @@ MixedArray::Grow(MixedArray* old, uint32_t newCap, uint32_t newMask) {
 
   ad->m_sizeAndPos      = old->m_sizeAndPos;
   ad->m_kindAndCount    = old->m_cap_kind; // cap_kind=old->cap_kind, count=0
+  ad->m_pad             = 0;
   ad->m_mask_used       = mask | uint64_t{oldUsed} << 32;
   ad->m_nextKI          = old->m_nextKI;
   auto table            = reinterpret_cast<int32_t*>(ad->data() + newCap);
@@ -1075,6 +1089,7 @@ MixedArray::Grow(MixedArray* old, uint32_t newCap, uint32_t newMask) {
   assert(ad->m_kind == old->m_kind);
   assert(ad->m_size == old->m_size);
   assert(ad->m_count == 0);
+  assert(ad->m_pad == 0);
   assert(ad->m_pos == old->m_pos);
   assert(ad->m_used == oldUsed);
   assert(ad->m_mask == mask);
@@ -1574,6 +1589,7 @@ MixedArray* MixedArray::CopyReserve(const MixedArray* src,
 
   ad->m_sizeAndPos      = src->m_sizeAndPos;
   ad->m_kindAndCount    = src->m_cap_kind | uint64_t{1} << 32; // count=1
+  ad->m_pad             = 0;
   ad->m_mask            = mask;
   ad->m_nextKI          = src->m_nextKI;
 
@@ -1636,6 +1652,7 @@ MixedArray* MixedArray::CopyReserve(const MixedArray* src,
   assert(ad->m_kind == src->m_kind);
   assert(ad->m_size == src->m_size);
   assert(ad->m_count == 1);
+  assert(ad->m_pad == 0);
   assert(ad->capacity() == cap);
   assert(ad->m_used <= oldUsed);
   assert(ad->m_used == dstElm - data);

@@ -161,20 +161,20 @@ void BitrefSurvey::cow_check_occurred(const ArrayData* ad) {
 
     if (ad->getCount() == 1) {
       dumb_counter++;
-      if (dumb_counter % 140 == 0) {
-        // Only the *extra* copies caused by MRB
+      // if (dumb_counter % 500 == 0) {
+      //   // Only the *extra* copies caused by MRB
         
-        int trace_size = backtrace(trace_buffer, trace_buffer_size);
-        // get backtrace symbols
-        char **trace_symbols = backtrace_symbols(trace_buffer, trace_size);
+      //   int trace_size = backtrace(trace_buffer, trace_buffer_size);
+      //   // get backtrace symbols
+      //   char **trace_symbols = backtrace_symbols(trace_buffer, trace_size);
 
-        // print array info and calling function to file
-        //fprintf(log_fp, "%8ld %s\n", ad_heap_size, ArrayData::kindToString(ad->m_kind));
-        fprintf(log_fp, "\t%s\n", trace_symbols[1]);
-        //log_string << std::string(trace_symbols[1]) << std::endl;
+      //   // print array info and calling function to file
+      //   //fprintf(log_fp, "%8ld %s\n", ad_heap_size, ArrayData::kindToString(ad->m_kind));
+      //   fprintf(log_fp, "\t%s\n", trace_symbols[1]);
+      //   //log_string << std::string(trace_symbols[1]) << std::endl;
 
-        free(trace_symbols);
-      }
+      //   free(trace_symbols);
+      // }
     }
 
   }

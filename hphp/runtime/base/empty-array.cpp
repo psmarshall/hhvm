@@ -136,6 +136,7 @@ std::pair<ArrayData*,TypedValue*> EmptyArray::MakePackedInl(TypedValue tv) {
   assert(cap == CapCode::ceil(cap).code);
   ad->m_sizeAndPos = 1; // size=1, pos=0
   ad->m_kindAndCount = cap; // kind=Packed, count=0
+  ad->m_pad = 0;
 
   auto& lval = *reinterpret_cast<TypedValue*>(ad + 1);
   lval.m_data = tv.m_data;
@@ -145,6 +146,7 @@ std::pair<ArrayData*,TypedValue*> EmptyArray::MakePackedInl(TypedValue tv) {
   assert(ad->m_size == 1);
   assert(ad->m_pos == 0);
   assert(ad->m_count == 0);
+  assert(ad->m_pad == 0);
   assert(PackedArray::checkInvariants(ad));
   return { ad, &lval };
 }
@@ -168,6 +170,7 @@ EmptyArray::MakeMixed(StringData* key, TypedValue val) {
 
   ad->m_sizeAndPos   = 1; // size=1, pos=0
   ad->m_kindAndCount = MixedArray::kMixedKind << 24; // capcode=0, count=0
+  ad->m_pad          = 0;
   ad->m_mask_used    = mask | uint64_t{1} << 32; // used=1
   ad->m_nextKI       = 0;
 
@@ -191,6 +194,7 @@ EmptyArray::MakeMixed(StringData* key, TypedValue val) {
   assert(ad->m_size == 1);
   assert(ad->m_pos == 0);
   assert(ad->m_count == 0);
+  assert(ad->m_pad == 0);
   assert(ad->capacity() == cap);
   assert(ad->m_used == 1);
   assert(ad->checkInvariants());
@@ -208,7 +212,8 @@ EmptyArray::MakeMixed(int64_t key, TypedValue val) {
   auto const ad   = smartAllocArray(cap, mask);
 
   ad->m_sizeAndPos    = 1; // size=1, pos=0
-  ad->m_kindAndCount  = MixedArray::kMixedKind << 24; // capcode=0, count=0
+  ad->m_kindAndCount  = MixedArray::kMixedKind << 24; // capcode=0, count=
+  ad->m_pad           = 0;
   ad->m_mask_used     = mask | uint64_t{1} << 32; // used=1
   ad->m_nextKI        = (key >= 0) ? key + 1 : 0;
 
@@ -231,6 +236,7 @@ EmptyArray::MakeMixed(int64_t key, TypedValue val) {
   assert(ad->m_size == 1);
   assert(ad->m_pos == 0);
   assert(ad->m_count == 0);
+  assert(ad->m_pad == 0);
   assert(ad->capacity() == cap);
   assert(ad->m_used == 1);
   assert(ad->checkInvariants());
