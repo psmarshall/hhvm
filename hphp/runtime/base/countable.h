@@ -109,6 +109,10 @@ inline bool hasExactlyOneRef(RefCount count) {
   return (uint32_t)count == 1;
 }
 
+inline bool maybeShared(bool mrb) {
+  return mrb;
+}
+
 inline bool isStatic(RefCount count) {
   return count == StaticValue;
 }
@@ -196,6 +200,9 @@ ALWAYS_INLINE bool decReleaseCheck(RefCount& count) {
   bool hasExactlyOneRef() const {                                       \
     assert(kindIsValid());                                              \
     return CountableManip::hasExactlyOneRef(m_hdr.count);               \
+  }                                                                     \
+  bool maybeShared() const {                                            \
+    return CountableManip::maybeShared(m_hdr.mrb);                      \
   }                                                                     \
   void incRefCount() const {                                            \
     assert(!MemoryManager::sweeping());                                 \

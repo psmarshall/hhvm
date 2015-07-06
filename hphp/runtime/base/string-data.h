@@ -196,6 +196,9 @@ struct StringData {
    * Reference-counting related.
    */
   IMPLEMENT_COUNTABLE_METHODS_WITH_STATIC
+  bool cowCheck() const {
+    return maybeShared();
+  }
 
   bool kindIsValid() const { return m_hdr.kind == HeaderKind::String; }
 

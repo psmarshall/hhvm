@@ -85,6 +85,9 @@ protected:
 
 public:
   IMPLEMENT_COUNTABLE_METHODS_WITH_STATIC
+  bool cowCheck() const {
+    return maybeShared();
+  }
 
   bool kindIsValid() const { return isArrayKind(m_hdr.kind); }
 
