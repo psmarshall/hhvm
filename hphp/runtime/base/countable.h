@@ -127,11 +127,8 @@ inline RefCount decRefCount(RefCount& count) {
   return (isRefCounted(count)) ? --count : count;
 }
 
-ALWAYS_INLINE bool decReleaseCheck(RefCount& count) {
-  assert(check_refcount_nz(count));
-  if (count == 1) return true;
-  if (count > 1) --count;
-  return false;
+ALWAYS_INLINE bool decReleaseCheck(bool mrb) {
+  return !mrb;
 }
 
 }
@@ -170,11 +167,8 @@ inline RefCount decRefCount(RefCount& count) {
   return --count;
 }
 
-ALWAYS_INLINE bool decReleaseCheck(RefCount& count) {
-  assert(check_refcount_nz(count));
-  if (count == 1) return true;
-  if (count > 1) --count;
-  return false;
+ALWAYS_INLINE bool decReleaseCheck(bool mrb) {
+  return !mrb;
 }
 
 }
@@ -221,7 +215,7 @@ ALWAYS_INLINE bool decReleaseCheck(RefCount& count) {
   ALWAYS_INLINE bool decReleaseCheck() {                                \
     assert(!MemoryManager::sweeping());                                 \
     assert(kindIsValid());                                              \
-    return CountableManip::decReleaseCheck(m_hdr.count);                \
+    return CountableManip::decReleaseCheck(m_hdr.mrb);                  \
   }                                                                     \
   ALWAYS_INLINE void decRefAndRelease() {                               \
     assert(kindIsValid());                                              \
@@ -270,7 +264,7 @@ ALWAYS_INLINE bool decReleaseCheck(RefCount& count) {
   ALWAYS_INLINE bool decReleaseCheck() {                                \
     assert(!MemoryManager::sweeping());                                 \
     assert(kindIsValid());                                              \
-    return CountableManipNS::decReleaseCheck(m_hdr.count);              \
+    return CountableManipNS::decReleaseCheck(m_hdr.mrb);                \
   }                                                                     \
   ALWAYS_INLINE bool decRefAndRelease() {                               \
     assert(!MemoryManager::sweeping());                                 \
