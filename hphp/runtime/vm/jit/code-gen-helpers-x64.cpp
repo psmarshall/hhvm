@@ -87,17 +87,17 @@ void emitGetGContext(Asm& as, PhysReg dest) {
 }
 
 // IfCountNotStatic --
-//   Emits if (%reg->_count < 0) { ... }.
+//   Emits if (%reg->_gcbyte < 0) { ... }.
 //   This depends on UncountedValue and StaticValue
 //   being the only valid negative refCounts and both indicating no
 //   ref count is needed.
 //   May short-circuit this check if the type is known to be
 //   static already.
 struct IfCountNotStatic {
-  typedef CondBlock<FAST_REFCOUNT_OFFSET,
+  typedef CondBlock<FAST_GC_BYTE_OFFSET,
                     0,
                     CC_S,
-                    int32_t> NonStaticCondBlock;
+                    int8_t> NonStaticCondBlock;
   static_assert(UncountedValue < 0 && StaticValue < 0, "");
   NonStaticCondBlock *m_cb; // might be null
   IfCountNotStatic(Asm& as, PhysReg reg,
@@ -146,7 +146,7 @@ void emitIncRef(Vout& v, Vreg base) {
   // TODO don't hardcode this
   auto const sf2 = v.makeReg();
   // take the current gc byte set the mrb
-  v << orbim{1 << 2, base[HeaderKindOffset + 1], sf2};
+  v << orbim{FAST_MRB_MASK, base[FAST_GC_BYTE_OFFSET], sf2};
 }
 
 void emitIncRef(Asm& as, PhysReg base) {

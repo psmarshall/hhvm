@@ -118,6 +118,10 @@ inline bool check_refcount_ns_nz(int32_t count) {
     m_hdr.count = count;                                                \
     if ((uint32_t)count <= 1) m_hdr.mrb = false;                        \
     else m_hdr.mrb = true;                                              \
+    if (count < 0) m_hdr._static = true;                                \
+    else m_hdr._static = false;                                         \
+    if (count == UncountedValue) m_hdr.uncounted = true;                \
+    else m_hdr.uncounted = false;                                       \
     assert(check_refcount(m_hdr.count));                                \
   }                                                                     \
                                                                         \
@@ -139,25 +143,21 @@ inline bool check_refcount_ns_nz(int32_t count) {
     assert(check_refcount(m_hdr.count));        \
     m_hdr.count = StaticValue;                  \
     m_hdr.mrb = true;                           \
+    m_hdr._static = true;                       \
+    m_hdr.uncounted = false;                    \
   }                                             \
   bool isStatic() const {                       \
-    if (m_hdr.count == StaticValue) {           \
-      assert(m_hdr.mrb);                        \
-      return true;                              \
-    }                                           \
-    return false;                               \
+    return m_hdr._static && !m_hdr.uncounted;   \
   }                                             \
   void setUncounted() const {                   \
     assert(check_refcount(m_hdr.count));        \
     m_hdr.count = UncountedValue;               \
     m_hdr.mrb = true;                           \
+    m_hdr._static = true;                       \
+    m_hdr.uncounted = true;                     \
   }                                             \
   bool isUncounted() const {                    \
-    if (m_hdr.count == UncountedValue) {        \
-      assert(m_hdr.mrb);                        \
-      return true;                              \
-    }                                           \
-    return false;                               \
+    return m_hdr._static && m_hdr.uncounted;    \
   }                                             \
   IMPLEMENT_COUNTABLE_METHODS_NO_STATIC
 
@@ -200,6 +200,10 @@ inline bool check_refcount_ns_nz(int32_t count) {
     m_hdr.count = count;                                \
     if ((uint32_t)count <= 1) m_hdr.mrb = false;        \
     else m_hdr.mrb = true;                              \
+    if (count < 0) m_hdr._static = true;                \
+    else m_hdr._static = false;                         \
+    if (count == UncountedValue) m_hdr.uncounted = true;\
+    else m_hdr.uncounted = false;                       \
     assert(check_refcount_ns(m_hdr.count));             \
   }                                                     \
                                                         \
