@@ -2485,8 +2485,9 @@ void CodeGenerator::decRefImpl(Vout& v, const IRInstruction* inst,
   }
 
   if (!ty.maybe(TStatic)) {
-    auto const sf = emitDecRef(v, base);
-    ifThen(v, vcold(), CC_E, sf, destroy, unlikelyDestroy);
+    auto const sf = v.makeReg();
+    v << testbim{FAST_MRB_MASK, base[FAST_GC_BYTE_OFFSET], sf};
+    ifThen(v, vcold(), CC_Z, sf, destroy, unlikelyDestroy);
     return;
   }
 

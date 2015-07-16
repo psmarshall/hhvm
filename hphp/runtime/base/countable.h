@@ -128,10 +128,7 @@ inline bool check_refcount_ns_nz(int32_t count) {
   }                                                                     \
   ALWAYS_INLINE bool decReleaseCheck() {                                \
     assert(!MemoryManager::sweeping());                                 \
-    assert(check_refcount_nz(m_hdr.count));                             \
-    if (m_hdr.count == 1) return true;                                  \
-    if (m_hdr.count > 1) --m_hdr.count;                                 \
-    return false;                                                       \
+    return !m_hdr.mrb;                                                  \
   }                                                                     \
   ALWAYS_INLINE void decRefAndRelease() {                               \
     if (decReleaseCheck()) release();                                   \
@@ -209,7 +206,7 @@ inline bool check_refcount_ns_nz(int32_t count) {
   ALWAYS_INLINE bool decRefAndRelease() {               \
     assert(!MemoryManager::sweeping());                 \
     assert(check_refcount_ns_nz(m_hdr.count));          \
-    if (!--m_hdr.count) {                               \
+    if (!m_hdr.mrb) {                                   \
       release();                                        \
       return true;                                      \
     }                                                   \
