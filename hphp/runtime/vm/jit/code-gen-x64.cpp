@@ -2500,10 +2500,7 @@ void CodeGenerator::cgDecRefNZ(IRInstruction* inst) {
   ifRefCountedNonStatic(
     vmain(), ty, srcLoc(inst, 0),
     [&] (Vout& v) {
-      auto const base = srcLoc(inst, 0).reg();
-      auto const sf = v.makeReg();
-      v << declm{base[FAST_REFCOUNT_OFFSET], sf};
-      emitAssertFlagsNonNegative(v, sf);
+
     }
   );
 }
@@ -3288,15 +3285,14 @@ void CodeGenerator::cgStaticLocInitCached(IRInstruction* inst) {
   auto& v = vmain();
 
   // If we're here, the target-cache-local RefData is all zeros, so we
-  // can initialize it by storing the new value into it's TypedValue
-  // and incrementing the RefData reference count (which will set it
-  // to 1).
+  // can initialize it by storing the new value into it's TypedValue.
+  // There is no reference count, and the GC word can be initialized to 
+  // all zeros as well.
   //
   // We are storing the rdSrc value into the static, but we don't need
   // to inc ref it because it's a bytecode invariant that it's not a
   // reference counted type.
   emitStoreTV(v, rdSrc[RefData::tvOffset()], srcLoc(inst, 1), inst->src(1));
-  v << inclm{rdSrc[FAST_REFCOUNT_OFFSET], v.makeReg()};
   v << storebi{uint8_t(HeaderKind::Ref), rdSrc[HeaderKindOffset]};
   static_assert(sizeof(HeaderKind) == 1, "");
 }
@@ -3537,8 +3533,8 @@ void CodeGenerator::cgVectorHasImmCopy(IRInstruction* inst) {
   auto arr = v.makeReg();
   v << load{vecReg[BaseVector::arrOffset()], arr};
   auto const sf = v.makeReg();
-  v << cmplim{1, arr[FAST_REFCOUNT_OFFSET], sf};
-  v << jcc{CC_NE, sf, {label(inst->next()), label(inst->taken())}};
+  v << testbim{FAST_MRB_MASK, arr[FAST_GC_BYTE_OFFSET], sf};
+  v << jcc{CC_NZ, sf, {label(inst->next()), label(inst->taken())}};
 }
 
 /**
@@ -5223,7 +5219,7 @@ void CodeGenerator::cgDbgAssertRefCount(IRInstruction* inst) {
   ifRefCountedType(
     vmain(), vmain(), inst->src(0)->type(), srcLoc(inst, 0),
     [&] (Vout& v) {
-      emitAssertRefCount(v, srcLoc(inst, 0).reg());
+
     }
   );
 }

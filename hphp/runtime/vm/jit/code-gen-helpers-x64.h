@@ -56,8 +56,6 @@ void emitGetGContext(Vout& as, Vreg dest);
 void emitTransCounterInc(Asm& a);
 void emitTransCounterInc(Vout&);
 
-void emitAssertFlagsNonNegative(Vout& v, Vreg sf);
-
 /*
  * Assuming rData is the data pointer for a refcounted (but possibly static)
  * value, emit a static check and DecRef, executing the code emitted by
@@ -79,7 +77,6 @@ void emitDecRefWork(Vout& v, Vout& vcold, Vreg rData,
 void emitIncRef(Vout& v, Vreg base);
 
 void emitAssertFlagsNonNegative(Vout& v, Vreg sf);
-void emitAssertRefCount(Vout& v, Vreg base);
 
 Vreg emitLdObjClass(Vout& v, Vreg objReg, Vreg dstReg);
 Vreg emitLdClsCctx(Vout& v, Vreg srcReg, Vreg dstReg);
