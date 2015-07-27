@@ -126,27 +126,10 @@ void emitTransCounterInc(Asm& a) {
   emitTransCounterInc(Vauto(a.code()).main());
 }
 
-Vreg emitDecRef(Vout& v, Vreg base) {
-  auto const sf = v.makeReg();
-  v << declm{base[FAST_REFCOUNT_OFFSET], sf};
-  emitAssertFlagsNonNegative(v, sf);
-  return sf;
-}
-
 void emitIncRef(Vout& v, Vreg base) {
-  if (RuntimeOption::EvalHHIRGenerateAsserts) {
-    emitAssertRefCount(v, base);
-  }
-  // emit incref
-  auto const sf = v.makeReg();
-  v << inclm{base[FAST_REFCOUNT_OFFSET], sf};
-  emitAssertFlagsNonNegative(v, sf);
-
   // set the mrb
-  // TODO don't hardcode this
-  auto const sf2 = v.makeReg();
-  // take the current gc byte set the mrb
-  v << orbim{FAST_MRB_MASK, base[FAST_GC_BYTE_OFFSET], sf2};
+  auto const sf = v.makeReg();
+  v << orbim{FAST_MRB_MASK, base[FAST_GC_BYTE_OFFSET], sf};
 }
 
 void emitIncRef(Asm& as, PhysReg base) {
@@ -166,7 +149,6 @@ void emitIncRefGenericRegSafe(Asm& as, PhysReg base, int disp, PhysReg tmpReg) {
     as.   loadq  (base[disp + TVOFF(m_data)], tmpReg);
     { // if !static
       IfCountNotStatic ins(as, tmpReg);
-      //as. incl(tmpReg[FAST_REFCOUNT_OFFSET]);
       emitIncRef(as, tmpReg);
     } // endif
   } // endif
@@ -175,16 +157,6 @@ void emitIncRefGenericRegSafe(Asm& as, PhysReg base, int disp, PhysReg tmpReg) {
 void emitAssertFlagsNonNegative(Vout& v, Vreg sf) {
   if (!RuntimeOption::EvalHHIRGenerateAsserts) return;
   ifThen(v, CC_NGE, sf, [&](Vout& v) { v << ud2{}; });
-}
-
-void emitAssertRefCount(Vout& v, Vreg base) {
-  auto const sf = v.makeReg();
-  v << cmplim{StaticValue, base[FAST_REFCOUNT_OFFSET], sf};
-  ifThen(v, CC_NLE, sf, [&](Vout& v) {
-    auto const sf = v.makeReg();
-    v << cmplim{RefCountMaxRealistic, base[FAST_REFCOUNT_OFFSET], sf};
-    ifThen(v, CC_NBE, sf, [&](Vout& v) { v << ud2{}; });
-  });
 }
 
 // Logical register move: ensures the value in src will be in dest
