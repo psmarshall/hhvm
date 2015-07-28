@@ -86,36 +86,6 @@ void emitGetGContext(Asm& as, PhysReg dest) {
   emitGetGContext(Vauto(as.code()).main(), dest);
 }
 
-// IfCountNotStatic --
-//   Emits if (%reg->_gcbyte < 0) { ... }.
-//   This depends on UncountedValue and StaticValue
-//   being the only valid negative refCounts and both indicating no
-//   ref count is needed.
-//   May short-circuit this check if the type is known to be
-//   static already.
-struct IfCountNotStatic {
-  typedef CondBlock<FAST_GC_BYTE_OFFSET,
-                    0,
-                    CC_S,
-                    int8_t> NonStaticCondBlock;
-  static_assert(UncountedValue < 0 && StaticValue < 0, "");
-  NonStaticCondBlock *m_cb; // might be null
-  IfCountNotStatic(Asm& as, PhysReg reg,
-                   MaybeDataType t = folly::none) {
-
-    // Objects and variants cannot be static
-    if (t != KindOfObject && t != KindOfResource && t != KindOfRef) {
-      m_cb = new NonStaticCondBlock(as, reg);
-    } else {
-      m_cb = nullptr;
-    }
-  }
-
-  ~IfCountNotStatic() {
-    delete m_cb;
-  }
-};
-
 void emitTransCounterInc(Vout& v) {
   if (!mcg->tx().isTransDBEnabled()) return;
   auto t = v.cns(mcg->tx().getTransCounterAddr());
@@ -137,20 +107,14 @@ void emitIncRef(Asm& as, PhysReg base) {
 }
 
 void emitIncRefCheckNonStatic(Asm& as, PhysReg base, DataType dtype) {
-  { // if !static then
-    IfCountNotStatic ins(as, base, dtype);
     emitIncRef(as, base);
-  } // endif
 }
 
 void emitIncRefGenericRegSafe(Asm& as, PhysReg base, int disp, PhysReg tmpReg) {
   { // if RC
     IfRefCounted irc(as, base, disp);
     as.   loadq  (base[disp + TVOFF(m_data)], tmpReg);
-    { // if !static
-      IfCountNotStatic ins(as, tmpReg);
-      emitIncRef(as, tmpReg);
-    } // endif
+    emitIncRef(as, tmpReg);
   } // endif
 }
 

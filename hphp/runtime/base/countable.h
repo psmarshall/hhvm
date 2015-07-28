@@ -128,17 +128,14 @@ inline bool check_refcount_ns_nz(int32_t count) {
 
 #define IMPLEMENT_COUNTABLE_METHODS             \
   void setStatic() const {                      \
-    m_hdr.mrb = true;                           \
-    m_hdr._static = true;                       \
-    m_hdr.uncounted = false;                    \
+    m_hdr.gcbyte = 0x84; /* _static=mrb=1*/     \
   }                                             \
   bool isStatic() const {                       \
     return m_hdr._static && !m_hdr.uncounted;   \
   }                                             \
   void setUncounted() const {                   \
-    m_hdr.mrb = true;                           \
-    m_hdr._static = true;                       \
-    m_hdr.uncounted = true;                     \
+    m_hdr.gcbyte = 0xC4;                        \
+    /* _static=uncounted=mrb=1*/                \
   }                                             \
   bool isUncounted() const {                    \
     return m_hdr._static && m_hdr.uncounted;    \

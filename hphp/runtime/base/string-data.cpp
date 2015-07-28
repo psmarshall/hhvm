@@ -824,12 +824,12 @@ void StringData::preCompute() {
 }
 
 void StringData::setStatic() {
-  setRefCount(StaticValue);
+  m_hdr.gcbyte = 0x84; /* _static=mrb=1*/
   preCompute();
 }
 
 void StringData::setUncounted() {
-  setRefCount(UncountedValue);
+  m_hdr.gcbyte = 0xC4; /* _static=uncounted=mrb=1*/
   preCompute();
 }
 
