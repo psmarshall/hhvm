@@ -586,7 +586,6 @@ void BaseVector::reserveImpl(uint32_t newCap) {
     for (; src != stop; ++src, ++dst) {
       cellDup(*src, *dst);
     }
-    oldAd->decRefCount();
   }
 }
 
@@ -652,7 +651,6 @@ void BaseVector::mutateImpl() {
   }
   assert(arrayData()->hasMultipleRefs());
   if (!m_size) {
-    arrayData()->decRefCount();
     m_arr = staticEmptyArray();
     m_capacity = 0;
     return;
@@ -660,7 +658,6 @@ void BaseVector::mutateImpl() {
   auto* oldAd = arrayData();
   m_arr = PackedArray::Copy(oldAd);
   assert(oldAd->hasMultipleRefs());
-  oldAd->decRefCount();
 }
 
 template<class TVector>
@@ -1389,7 +1386,6 @@ void HashCollection::mutateImpl() {
   auto* oldAd = arrayData();
   m_arr = MixedArray::asMixed(MixedArray::Copy(oldAd));
   assert(oldAd->hasMultipleRefs());
-  oldAd->decRefCount();
 }
 
 NEVER_INLINE

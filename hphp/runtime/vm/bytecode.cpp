@@ -346,7 +346,6 @@ VarEnv::VarEnv()
   m_nvTable.set(s_GLOBALS.get(), &globalArray);
 
   assert(globals->hasMultipleRefs());
-  globals->decRefCount();
 }
 
 VarEnv::VarEnv(ActRec* fp, ExtraArgs* eArgs)
