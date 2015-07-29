@@ -28,7 +28,7 @@ APCString::MakeSharedString(DataType type, StringData* data) {
   auto apcStr       = new (mem) APCString(type);
 
   apcStr->m_str.m_data        = reinterpret_cast<char*>(apcStr + 1);
-  apcStr->m_str.m_hdr.init(cc, HeaderKind::String, 0);
+  apcStr->m_str.m_hdr.init(cc, HeaderKind::String, UnsharedGCByte);
   apcStr->m_str.m_len         = len; // don't store hash
 
   apcStr->m_str.m_data[len] = 0;
