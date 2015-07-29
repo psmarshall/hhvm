@@ -44,10 +44,6 @@ constexpr uint8_t SharedGCByte = 0x4; // when refcount == 0 or 1
  * and define counting methods with these macros.
  */
 #define IMPLEMENT_COUNTABLE_METHODS_NO_STATIC                           \
-  RefCount getCount() const {                                           \
-    return m_hdr.mrb + 1;                                               \
-  }                                                                     \
-                                                                        \
   bool isRefCounted() const {                                           \
     return !m_hdr._static;                                              \
   }                                                                     \
@@ -69,10 +65,6 @@ constexpr uint8_t SharedGCByte = 0x4; // when refcount == 0 or 1
     m_hdr.mrb = true;                                                   \
   }                                                                     \
                                                                         \
-  RefCount decRefCount() const {                                        \
-    assert(!MemoryManager::sweeping());                                 \
-    return m_hdr.mrb + 1;                                               \
-  }                                                                     \
   ALWAYS_INLINE bool decReleaseCheck() {                                \
     assert(!MemoryManager::sweeping());                                 \
     return !m_hdr.mrb;                                                  \
@@ -97,10 +89,6 @@ constexpr uint8_t SharedGCByte = 0x4; // when refcount == 0 or 1
   IMPLEMENT_COUNTABLE_METHODS_NO_STATIC
 
 #define IMPLEMENT_COUNTABLENF_METHODS_NO_STATIC         \
-  RefCount getCount() const {                           \
-    return m_hdr.mrb + 1;                               \
-  }                                                     \
-                                                        \
   bool isRefCounted() const { return true; }            \
                                                         \
   bool hasMultipleRefs() const {                        \
@@ -114,11 +102,6 @@ constexpr uint8_t SharedGCByte = 0x4; // when refcount == 0 or 1
   void incRefCount() const {                            \
     assert(!MemoryManager::sweeping());                 \
     m_hdr.mrb = true;                                   \
-  }                                                     \
-                                                        \
-  RefCount decRefCount() const {                        \
-    assert(!MemoryManager::sweeping());                 \
-    return m_hdr.mrb + 1;                               \
   }                                                     \
                                                         \
   ALWAYS_INLINE bool decRefAndRelease() {               \

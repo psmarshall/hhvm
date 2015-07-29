@@ -85,9 +85,8 @@ ZEND_API int zend_list_insert(void *ptr, int type TSRMLS_DC) {
 ZEND_API int _zend_list_delete(int id TSRMLS_DC) {
   zend_rsrc_list_entry* le = zend_list_id_to_entry(id TSRMLS_CC);
   if (le) {
-    int refcount = le->getCount();
-    decRefRes(le);
-    if (refcount <= 1) {
+    bool released = decRefRes(le);
+    if (released) {
       RL()[id] = nullptr;
       return SUCCESS;
     } else {

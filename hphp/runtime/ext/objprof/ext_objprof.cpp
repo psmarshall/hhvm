@@ -137,7 +137,6 @@ std::pair<int, double> sizeOfArray(const ArrayData* props) {
             key_size_pair.first,
             key_size_pair.second
           );
-          str->decRefCount();
           break;
         }
         case HPHP::KindOfInt64: {
@@ -208,7 +207,6 @@ void stringsOfArray(
           StringData* str = key.m_data.pstr;
           val = MixedArray::NvGetStr(props, str);
           auto key_str = str->toCppString();
-          str->decRefCount();
           tvGetStrings(&key, metrics, path, pointers);
           path->push_back(std::string("[\"" + key_str + "\"]"));
           break;
@@ -280,7 +278,7 @@ std::pair<int, double> tvGetSize(const TypedValue* tv, int ref_adjust) {
     }
     case HPHP::KindOfArray: {
       ArrayData* arr = tv->m_data.parr;
-      auto arr_mrb = arr->hasMultipleRefs();
+      auto arr_mrb = arr->hasMultipleRefs() ? 2 : 1;
       FTRACE(3, " ArrayData tv: at {} that with mrb {} before adjust {}\n",
         (void*)arr,
         arr_mrb,
@@ -298,10 +296,10 @@ std::pair<int, double> tvGetSize(const TypedValue* tv, int ref_adjust) {
     case HPHP::KindOfResource: {
       // Not really counting the resource itself
       ResourceData* resource = tv->m_data.pres;
-      auto res_ref_count = resource->getCount() + ref_adjust;
+      auto res_mrb = resource->hasMultipleRefs() ? 2 : 1;
       size += sizeof(*resource);
-      if (res_ref_count > 0) {
-        sized += sizeof(*resource) / (double)(res_ref_count);
+      if (res_mrb > 0) {
+        sized += sizeof(*resource) / (double)(res_mrb);
       }
       break;
     }
@@ -310,7 +308,7 @@ std::pair<int, double> tvGetSize(const TypedValue* tv, int ref_adjust) {
       size += sizeof(*ref);
       sized += sizeof(*ref);
 
-      auto ref_mrb = ref->hasMultipleRefs();
+      auto ref_mrb = ref->hasMultipleRefs() ? 2 : 1;
       FTRACE(3, " RefData tv at {} that with mrb {} before adjust {}\n",
         (void*)ref,
         ref_mrb,
@@ -330,7 +328,7 @@ std::pair<int, double> tvGetSize(const TypedValue* tv, int ref_adjust) {
     case HPHP::KindOfString: {
       StringData* str = tv->m_data.pstr;
       size += str->size();
-      auto str_mrb = str->hasMultipleRefs();
+      auto str_mrb = str->hasMultipleRefs() ? 2 : 1;
       FTRACE(3, " String tv: {} string at {} mrb: {} before adjust {}\n",
         str->data(),
         (void*)str,

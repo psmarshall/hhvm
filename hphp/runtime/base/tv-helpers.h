@@ -132,11 +132,7 @@ inline void tvRefcountedDecRef(TypedValue v) {
 
 // Assumes the value is live, and has a count of at least 2 coming in.
 inline void tvRefcountedDecRefHelperNZ(DataType type, uint64_t datum) {
-  if (IS_REFCOUNTED_TYPE(type)) {
-    auto* asStr = reinterpret_cast<StringData*>(datum);
-    auto const DEBUG_ONLY newCount = asStr->decRefCount();
-    assert(newCount != 0);
-  }
+
 }
 
 inline void tvRefcountedDecRefNZ(TypedValue v) {
@@ -159,9 +155,6 @@ ALWAYS_INLINE void tvRefcountedDecRef(TypedValue* tv) {
 // decref when the count is known not to reach zero
 ALWAYS_INLINE void tvDecRefOnly(TypedValue* tv) {
   assert(!tvDecRefWillCallHelper(tv));
-  if (IS_REFCOUNTED_TYPE(tv->m_type)) {
-    tv->m_data.pstr->decRefCount();
-  }
 }
 
 // Assumes 'tv' is live
