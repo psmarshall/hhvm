@@ -37,7 +37,7 @@ namespace HPHP {
 constexpr uint8_t StaticGCByte = 0x84; // 1000 0100, _static=mrb=1
 constexpr uint8_t UncountedGCByte = 0xC4; // 1100 0100, _static=uncounted=mrb=1
 constexpr uint8_t UnsharedGCByte = 0x0; // when refcount == 0 or 1
-constexpr uint8_t SharedGCByte = 0x4; // when refcount == 0 or 1
+constexpr uint8_t SharedGCByte = 0x4; // when refcount > 1
 
 /**
  * Ref-counted types have a count field at FAST_REFCOUNT_OFFSET
