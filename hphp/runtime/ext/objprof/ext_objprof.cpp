@@ -280,18 +280,18 @@ std::pair<int, double> tvGetSize(const TypedValue* tv, int ref_adjust) {
     }
     case HPHP::KindOfArray: {
       ArrayData* arr = tv->m_data.parr;
-      auto arr_ref_count = arr->getCount() + ref_adjust;
-      FTRACE(3, " ArrayData tv: at {} that with ref count {} after adjust {}\n",
+      auto arr_mrb = arr->hasMultipleRefs();
+      FTRACE(3, " ArrayData tv: at {} that with mrb {} before adjust {}\n",
         (void*)arr,
-        arr_ref_count,
+        arr_mrb,
         ref_adjust
       );
       auto size_of_array_pair = sizeOfArray(arr);
       size += sizeof(*arr);
       size += size_of_array_pair.first;
-      if (arr_ref_count > 0) {
-        sized += sizeof(*arr) / (double)arr_ref_count;
-        sized += size_of_array_pair.second / (double)(arr_ref_count);
+      if (arr_mrb > 0) {
+        sized += sizeof(*arr) / (double)arr_mrb;
+        sized += size_of_array_pair.second / (double)(arr_mrb);
       }
       break;
     }
@@ -310,10 +310,10 @@ std::pair<int, double> tvGetSize(const TypedValue* tv, int ref_adjust) {
       size += sizeof(*ref);
       sized += sizeof(*ref);
 
-      auto ref_ref_count = ref->getRealCount() + ref_adjust;
-      FTRACE(3, " RefData tv at {} that with ref count {} after adjust {}\n",
+      auto ref_mrb = ref->hasMultipleRefs();
+      FTRACE(3, " RefData tv at {} that with mrb {} before adjust {}\n",
         (void*)ref,
-        ref_ref_count,
+        ref_mrb,
         ref_adjust
       );
 
@@ -321,8 +321,8 @@ std::pair<int, double> tvGetSize(const TypedValue* tv, int ref_adjust) {
       auto size_of_tv_pair = tvGetSize((TypedValue*)cell, 0);
       size += size_of_tv_pair.first;
 
-      if (ref_ref_count > 0) {
-        sized += size_of_tv_pair.second / (double)(ref_ref_count);
+      if (ref_mrb > 0) {
+        sized += size_of_tv_pair.second / (double)(ref_mrb);
       }
       break;
     }
@@ -330,16 +330,16 @@ std::pair<int, double> tvGetSize(const TypedValue* tv, int ref_adjust) {
     case HPHP::KindOfString: {
       StringData* str = tv->m_data.pstr;
       size += str->size();
-      auto str_ref_count = str->getCount() + ref_adjust;
-      FTRACE(3, " String tv: {} string at {} ref count: {} after adjust {}\n",
+      auto str_mrb = str->hasMultipleRefs();
+      FTRACE(3, " String tv: {} string at {} mrb: {} before adjust {}\n",
         str->data(),
         (void*)str,
-        str_ref_count,
+        str_mrb,
         ref_adjust
       );
 
-      if (str_ref_count > 0) {
-        sized += (str->size() / (double)(str_ref_count));
+      if (str_mrb > 0) {
+        sized += (str->size() / (double)(str_mrb));
       }
       break;
     }
@@ -404,7 +404,7 @@ void tvGetStrings(
         pointers->insert(str);
         str_agg.dups++;
       }
-      if (str->getCount() < 0) {
+      if (!str->isRefCounted()) {
         str_agg.srefs++;
       }
 

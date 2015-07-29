@@ -33,46 +33,11 @@ namespace HPHP {
  * Using 8-bit values generates shorter cmp instructions while still being
  * far enough from 0 to be safe.
  */
-constexpr size_t UncountedBitPos = 31;
-constexpr int32_t UncountedValue = -128;
-constexpr int32_t StaticValue = -127; // implies UncountedValue
-constexpr int32_t RefCountMaxRealistic = (1 << 30) - 1;
 
-static_assert((uint32_t)UncountedValue & (1uL << UncountedBitPos),
-              "Check UncountedValue and UncountedBitPos");
-static_assert((uint32_t)StaticValue & (1uL << UncountedBitPos),
-              "Check StaticValue and UncountedBitPos");
-
-/*
- * Check that the refcount is realistic, and not the static flag
- */
-inline bool check_refcount_ns(int32_t count) {
-  return (uint32_t)count <= (uint32_t)RefCountMaxRealistic;
-}
-
-/*
- * Real count values should always be less than or equal to
- * RefCountMaxRealistic, and asserting this will also catch
- * common malloc freed-memory patterns (e.g. 0x5a5a5a5a and smart
- * allocator's 0x6a6a6a6a).
- */
-inline bool check_refcount(int32_t count) {
-  return count <= StaticValue || check_refcount_ns(count);
-}
-
-/*
- * As above, but additionally check for non-zero
- */
-inline bool check_refcount_nz(int32_t count) {
-  return count <= StaticValue || check_refcount_ns(count - 1);
-}
-
-/*
- * As above, but additionally check for greater-than-zero
- */
-inline bool check_refcount_ns_nz(int32_t count) {
-  return check_refcount_ns(count - 1);
-}
+constexpr uint8_t StaticGCByte = 0x84; // 1000 0100, _static=mrb=1
+constexpr uint8_t UncountedGCByte = 0xC4; // 1100 0100, _static=uncounted=mrb=1
+constexpr uint8_t UnsharedGCByte = 0x0; // when refcount == 0 or 1
+constexpr uint8_t SharedGCByte = 0x4; // when refcount == 0 or 1
 
 /**
  * Ref-counted types have a count field at FAST_REFCOUNT_OFFSET
@@ -104,16 +69,6 @@ inline bool check_refcount_ns_nz(int32_t count) {
     m_hdr.mrb = true;                                                   \
   }                                                                     \
                                                                         \
-  void setRefCount(RefCount count) {                                    \
-    assert(count == StaticValue || !MemoryManager::sweeping());         \
-    if ((uint32_t)count <= 1) m_hdr.mrb = false;                        \
-    else m_hdr.mrb = true;                                              \
-    if (count < 0) m_hdr._static = true;                                \
-    else m_hdr._static = false;                                         \
-    if (count == UncountedValue) m_hdr.uncounted = true;                \
-    else m_hdr.uncounted = false;                                       \
-  }                                                                     \
-                                                                        \
   RefCount decRefCount() const {                                        \
     assert(!MemoryManager::sweeping());                                 \
     return m_hdr.mrb + 1;                                               \
@@ -128,14 +83,13 @@ inline bool check_refcount_ns_nz(int32_t count) {
 
 #define IMPLEMENT_COUNTABLE_METHODS             \
   void setStatic() const {                      \
-    m_hdr.gcbyte = 0x84; /* _static=mrb=1*/     \
+    m_hdr.gcbyte = StaticGCByte;                \
   }                                             \
   bool isStatic() const {                       \
     return m_hdr._static && !m_hdr.uncounted;   \
   }                                             \
   void setUncounted() const {                   \
-    m_hdr.gcbyte = 0xC4;                        \
-    /* _static=uncounted=mrb=1*/                \
+    m_hdr.gcbyte = UncountedGCByte;             \
   }                                             \
   bool isUncounted() const {                    \
     return m_hdr._static && m_hdr.uncounted;    \
@@ -165,16 +119,6 @@ inline bool check_refcount_ns_nz(int32_t count) {
   RefCount decRefCount() const {                        \
     assert(!MemoryManager::sweeping());                 \
     return m_hdr.mrb + 1;                               \
-  }                                                     \
-                                                        \
-  void setRefCount(RefCount count) {                    \
-    assert(!MemoryManager::sweeping());                 \
-    if ((uint32_t)count <= 1) m_hdr.mrb = false;        \
-    else m_hdr.mrb = true;                              \
-    if (count < 0) m_hdr._static = true;                \
-    else m_hdr._static = false;                         \
-    if (count == UncountedValue) m_hdr.uncounted = true;\
-    else m_hdr.uncounted = false;                       \
   }                                                     \
                                                         \
   ALWAYS_INLINE bool decRefAndRelease() {               \

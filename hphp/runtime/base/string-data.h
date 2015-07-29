@@ -475,8 +475,6 @@ private:
   void incrementHelper();
   bool checkSane() const;
   void preCompute();
-  void setStatic();
-  void setUncounted();
 
 private:
   char* m_data;

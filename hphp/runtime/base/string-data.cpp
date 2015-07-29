@@ -128,7 +128,9 @@ StringData* StringData::MakeShared(StringSlice sl, bool trueStatic) {
   auto const data = reinterpret_cast<char*>(sd + 1);
 
   sd->m_data        = data;
-  sd->m_hdr.init(cc, HeaderKind::String, 0);
+  sd->m_hdr.init(cc, HeaderKind::String, 
+      trueStatic ? StaticGCByte : UncountedGCByte);
+  
   sd->m_lenAndHash  = sl.len; // hash=0
 
   data[sl.len] = 0;
@@ -137,11 +139,7 @@ StringData* StringData::MakeShared(StringSlice sl, bool trueStatic) {
   // Recalculating ret from mcret avoids a spill.
 
   assert(ret->m_hash == 0);
-  if (trueStatic) {
-    ret->setStatic();
-  } else {
-    ret->setUncounted();
-  }
+  ret->preCompute(); // get m_hash right
 
   assert(ret == sd);
   assert(ret->isFlat());
@@ -165,15 +163,15 @@ StringData* StringData::MakeEmpty() {
   auto const data = reinterpret_cast<char*>(sd + 1);
 
   sd->m_data        = data;
-  sd->m_hdr.init(HeaderKind::String, 0);
+  sd->m_hdr.init(HeaderKind::String, StaticGCByte);
   sd->m_lenAndHash  = 0; // len=0, hash=0
   data[0] = 0;
+  sd->preCompute();
 
   assert(sd->m_len == 0);
   assert(sd->m_hash == 0);
   assert(sd->capacity() == 0);
   assert(sd->m_hdr.kind == HeaderKind::String);
-  sd->setStatic();
   assert(sd->isFlat());
   assert(sd->isStatic());
   assert(sd->checkSane());
@@ -229,7 +227,7 @@ StringData* StringData::Make(const StringData* s, CopyStringMode) {
   auto const cc       = allocRet.second;
   auto const data     = reinterpret_cast<char*>(sd + 1);
   sd->m_data          = data;
-  sd->m_hdr.init(cc, HeaderKind::String, 1);
+  sd->m_hdr.init(cc, HeaderKind::String, UnsharedGCByte);
   sd->m_lenAndHash    = s->m_lenAndHash;
   *memcpy8(data, s->m_data, s->m_len) = 0;
 
@@ -244,7 +242,7 @@ StringData* StringData::Make(StringSlice sl, CopyStringMode) {
   auto const data     = reinterpret_cast<char*>(sd + 1);
 
   sd->m_data         = data;
-  sd->m_hdr.init(cc, HeaderKind::String, 1);
+  sd->m_hdr.init(cc, HeaderKind::String, UnsharedGCByte);
   sd->m_lenAndHash   = sl.len; // hash=0
 
   data[sl.len] = 0;
@@ -277,7 +275,7 @@ StringData* StringData::Make(size_t reserveLen) {
 
   data[0] = 0;
   sd->m_data        = data;
-  sd->m_hdr.init(cc, HeaderKind::String, 1);
+  sd->m_hdr.init(cc, HeaderKind::String, UnsharedGCByte);
   sd->m_lenAndHash  = 0; // len=hash=0
 
   assert(sd->hasExactlyOneRef());
@@ -306,7 +304,7 @@ StringData* StringData::Make(StringSlice r1, StringSlice r2) {
   auto const data     = reinterpret_cast<char*>(sd + 1);
 
   sd->m_data        = data;
-  sd->m_hdr.init(cc, HeaderKind::String, 1);
+  sd->m_hdr.init(cc, HeaderKind::String, UnsharedGCByte);
   sd->m_lenAndHash  = len; // hash=0
 
   memcpy(data, r1.ptr, r1.len);
@@ -329,7 +327,7 @@ StringData* StringData::Make(const StringData* s1, const StringData* s2) {
   auto const data     = reinterpret_cast<char*>(sd + 1);
 
   sd->m_data          = data;
-  sd->m_hdr.init(cc, HeaderKind::String, 1);
+  sd->m_hdr.init(cc, HeaderKind::String, UnsharedGCByte);
   sd->m_lenAndHash    = len; // hash=0
 
   auto next = memcpy8(data, s1->m_data, s1->m_len);
@@ -354,7 +352,7 @@ StringData* StringData::Make(StringSlice r1, StringSlice r2,
   auto const data     = reinterpret_cast<char*>(sd + 1);
 
   sd->m_data        = data;
-  sd->m_hdr.init(cc, HeaderKind::String, 1);
+  sd->m_hdr.init(cc, HeaderKind::String, UnsharedGCByte);
   sd->m_lenAndHash  = len; // hash=0
 
   void* p;
@@ -378,7 +376,7 @@ StringData* StringData::Make(StringSlice r1, StringSlice r2,
   auto const data     = reinterpret_cast<char*>(sd + 1);
 
   sd->m_data        = data;
-  sd->m_hdr.init(cc, HeaderKind::String, 1);
+  sd->m_hdr.init(cc, HeaderKind::String, UnsharedGCByte);
   sd->m_lenAndHash  = len; // hash=0
 
   void* p;
@@ -415,7 +413,7 @@ StringData* StringData::MakeAPCSlowPath(const APCString* shared) {
   );
   auto const data = shared->getStringData();
   sd->m_data = const_cast<char*>(data->m_data);
-  sd->m_hdr.init(data->m_hdr, 1);
+  sd->m_hdr.init(data->m_hdr, UnsharedGCByte);
   sd->m_lenAndHash = data->m_lenAndHash;
   sd->sharedPayload()->shared = shared;
   sd->enlist();
@@ -457,7 +455,7 @@ StringData* StringData::Make(const APCString* shared) {
   assert(cc.code == cap - kCapOverhead);
 
   sd->m_data = pdst;
-  sd->m_hdr.init(cc, HeaderKind::String, 1);
+  sd->m_hdr.init(cc, HeaderKind::String, UnsharedGCByte);
   sd->m_lenAndHash = len | int64_t{hash} << 32;
 
   // pdst[len] = 0;
@@ -633,7 +631,7 @@ StringData* StringData::reserve(size_t cap) {
   auto const data     = reinterpret_cast<char*>(sd + 1);
 
   sd->m_data          = data;
-  sd->m_hdr.init(cc, HeaderKind::String, 1);
+  sd->m_hdr.init(cc, HeaderKind::String, UnsharedGCByte);
   // Smart allocated StringData are always aligned at 16 bytes, thus it is safe
   // to copy in 16-byte groups. This copies m_lenAndHash (8 bytes), the
   // characters (m_len bytes), add the trailing zero (1 byte).
@@ -683,7 +681,7 @@ StringData* StringData::escalate(size_t cap) {
   auto const data     = reinterpret_cast<char*>(sd + 1);
 
   sd->m_data          = data;
-  sd->m_hdr.init(cc, HeaderKind::String, 1);
+  sd->m_hdr.init(cc, HeaderKind::String, UnsharedGCByte);
   sd->m_lenAndHash    = m_lenAndHash;
   *memcpy8(data, m_data, m_len) = 0;
 
@@ -696,7 +694,7 @@ StringData* StringData::escalate(size_t cap) {
 void StringData::dump() const {
   StringSlice s = slice();
 
-  printf("StringData(%d) (%s%s%d): [", getCount(),
+  printf("StringData(%d) (%s%s%d): [", maybeShared(),
          isShared() ? "shared " : "",
          isStatic() ? "static " : "",
          s.len);
@@ -821,16 +819,6 @@ void StringData::preCompute() {
                          1, nullptr) == KindOfNull)) {
     m_hash |= STRHASH_MSB;
   }
-}
-
-void StringData::setStatic() {
-  m_hdr.gcbyte = 0x84; /* _static=mrb=1*/
-  preCompute();
-}
-
-void StringData::setUncounted() {
-  m_hdr.gcbyte = 0xC4; /* _static=uncounted=mrb=1*/
-  preCompute();
 }
 
 NEVER_INLINE strhash_t StringData::hashHelper() const {
