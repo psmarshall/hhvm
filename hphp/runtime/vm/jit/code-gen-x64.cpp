@@ -2422,14 +2422,9 @@ void CodeGenerator::decRefImpl(Vout& v, const IRInstruction* inst,
                v.makeReg()};
   }
 
-  if (!ty.maybe(TStatic)) {
-    auto const sf = v.makeReg();
-    v << testbim{FAST_MRB_MASK, base[FAST_GC_BYTE_OFFSET], sf};
-    ifThen(v, vcold(), CC_Z, sf, destroy, unlikelyDestroy);
-    return;
-  }
-
-  emitDecRefWork(v, vcold(), base, destroy, unlikelyDestroy);
+  auto const sf = v.makeReg();
+  v << testbim{FAST_MRB_MASK, base[FAST_GC_BYTE_OFFSET], sf};
+  ifThen(v, vcold(), CC_Z, sf, destroy, unlikelyDestroy);
 }
 
 void CodeGenerator::emitDecRefTypeStat(Vout& v, const IRInstruction* inst) {
@@ -5206,12 +5201,7 @@ void CodeGenerator::cgDbgTraceCall(IRInstruction* inst) {
 }
 
 void CodeGenerator::cgDbgAssertRefCount(IRInstruction* inst) {
-  ifRefCountedType(
-    vmain(), vmain(), inst->src(0)->type(), srcLoc(inst, 0),
-    [&] (Vout& v) {
 
-    }
-  );
 }
 
 void CodeGenerator::cgDbgAssertType(IRInstruction* inst) {
