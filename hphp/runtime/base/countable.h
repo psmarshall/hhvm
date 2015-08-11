@@ -53,28 +53,32 @@ constexpr uint8_t SharedGCByte = 0x4; // when refcount > 1
  */
 namespace CountableManip {
 
-inline bool isRefCounted(bool _static) {
-  return !_static;
+inline bool isRefCounted(GCByte gcbyte) {
+  return (int8_t)gcbyte >= 0;
 }
 
-inline bool hasMultipleRefs(bool mrb) {
-  return mrb;
+inline bool hasMultipleRefs(GCByte gcbyte) {
+  return gcbyte & FAST_MRB_MASK;
 }
 
-inline bool hasExactlyOneRef(bool mrb) {
-  return !mrb;
+inline bool hasExactlyOneRef(GCByte gcbyte) {
+  return !(gcbyte & FAST_MRB_MASK);
 }
 
-inline bool maybeShared(bool mrb) {
-  return mrb;
+inline bool maybeShared(GCByte gcbyte) {
+  return gcbyte & FAST_MRB_MASK;
 }
 
-inline bool isStatic(bool _static, bool uncounted) {
-  return _static && !uncounted;
+inline bool isStatic(GCByte gcbyte) {
+  return (int8_t)gcbyte < 0 && !(gcbyte & FAST_UNCOUNTED_MASK);
 }
 
-ALWAYS_INLINE bool decReleaseCheck(bool mrb) {
-  return !mrb;
+inline void incRefCount(GCByte& gcbyte) {
+  gcbyte = gcbyte | FAST_MRB_MASK;
+}
+
+ALWAYS_INLINE bool decReleaseCheck(GCByte gcbyte) {
+  return !(gcbyte & FAST_MRB_MASK);
 }
 
 }
@@ -84,20 +88,24 @@ ALWAYS_INLINE bool decReleaseCheck(bool mrb) {
  */
 namespace CountableManipNS {
 
-inline bool isRefCounted(RefCount count) { return true; }
+inline bool isRefCounted(GCByte gcbyte) { return true; }
 
-inline bool hasMultipleRefs(bool mrb) {
-  return mrb;
+inline bool hasMultipleRefs(GCByte gcbyte) {
+  return gcbyte & FAST_MRB_MASK;
 }
 
-inline bool hasExactlyOneRef(bool mrb) {
-  return !mrb;
+inline bool hasExactlyOneRef(GCByte gcbyte) {
+  return !(gcbyte & FAST_MRB_MASK);
 }
 
-inline bool isStatic(bool mrb) { return false; }
+inline bool isStatic(GCByte gcbyte) { return false; }
 
-ALWAYS_INLINE bool decReleaseCheck(bool mrb) {
-  return !mrb;
+inline void incRefCount(GCByte& gcbyte) {
+  gcbyte = gcbyte | FAST_MRB_MASK;
+}
+
+ALWAYS_INLINE bool decReleaseCheck(GCByte gcbyte) {
+  return !(gcbyte & FAST_MRB_MASK);
 }
 
 }
@@ -110,18 +118,18 @@ ALWAYS_INLINE bool decReleaseCheck(bool mrb) {
 #define IMPLEMENT_COUNTABLE_METHODS_WITH_STATIC                         \
   bool isRefCounted() const {                                           \
     assert(kindIsValid());                                              \
-    return CountableManip::isRefCounted(m_hdr._static);                 \
+    return CountableManip::isRefCounted(m_hdr.gcbyte);                  \
   }                                                                     \
   bool hasMultipleRefs() const {                                        \
     assert(kindIsValid());                                              \
-    return CountableManip::hasMultipleRefs(m_hdr.mrb);                  \
+    return CountableManip::hasMultipleRefs(m_hdr.gcbyte);               \
   }                                                                     \
   bool hasExactlyOneRef() const {                                       \
     assert(kindIsValid());                                              \
-    return CountableManip::hasExactlyOneRef(m_hdr.mrb);                 \
+    return CountableManip::hasExactlyOneRef(m_hdr.gcbyte);              \
   }                                                                     \
   bool maybeShared() const {                                            \
-    return CountableManip::maybeShared(m_hdr.mrb);                      \
+    return CountableManip::maybeShared(m_hdr.gcbyte);                   \
   }                                                                     \
   bool cowCheck() const {                                               \
     return maybeShared();                                               \
@@ -129,12 +137,12 @@ ALWAYS_INLINE bool decReleaseCheck(bool mrb) {
   void incRefCount() const {                                            \
     assert(!MemoryManager::sweeping());                                 \
     assert(kindIsValid());                                              \
-    m_hdr.mrb = true; /* can't pass a ref to a bitfield :( */           \
+    CountableManip::incRefCount(m_hdr.gcbyte);                          \
   }                                                                     \
   ALWAYS_INLINE bool decReleaseCheck() {                                \
     assert(!MemoryManager::sweeping());                                 \
     assert(kindIsValid());                                              \
-    return CountableManip::decReleaseCheck(m_hdr.mrb);                  \
+    return CountableManip::decReleaseCheck(m_hdr.gcbyte);               \
   }                                                                     \
   ALWAYS_INLINE void decRefAndRelease() {                               \
     assert(kindIsValid());                                              \
@@ -142,7 +150,7 @@ ALWAYS_INLINE bool decReleaseCheck(bool mrb) {
   }                                                                     \
   bool isStatic() const {                                               \
     assert(kindIsValid());                                              \
-    return CountableManip::isStatic(m_hdr._static, m_hdr.uncounted);    \
+    return CountableManip::isStatic(m_hdr.gcbyte);                      \
   }                                                                     \
   bool isUncounted() const {                                            \
     assert(kindIsValid());                                              \
@@ -152,29 +160,29 @@ ALWAYS_INLINE bool decReleaseCheck(bool mrb) {
 #define IMPLEMENT_COUNTABLE_METHODS_NO_STATIC                           \
   bool isRefCounted() const {                                           \
     assert(kindIsValid());                                              \
-    return CountableManipNS::isRefCounted(m_hdr.count);                 \
+    return CountableManipNS::isRefCounted(m_hdr._static);               \
   }                                                                     \
   bool hasMultipleRefs() const {                                        \
     assert(kindIsValid());                                              \
-    return CountableManipNS::hasMultipleRefs(m_hdr.mrb);                \
+    return CountableManipNS::hasMultipleRefs(m_hdr.gcbyte);             \
   }                                                                     \
   bool hasExactlyOneRef() const {                                       \
     assert(kindIsValid());                                              \
-    return CountableManipNS::hasExactlyOneRef(m_hdr.mrb);               \
+    return CountableManipNS::hasExactlyOneRef(m_hdr.gcbyte);            \
   }                                                                     \
   bool isStatic() const {                                               \
     assert(kindIsValid());                                              \
-    return CountableManipNS::isStatic(m_hdr.count);                     \
+    return CountableManipNS::isStatic(m_hdr.gcbyte);                    \
   }                                                                     \
   void incRefCount() const {                                            \
     assert(!MemoryManager::sweeping());                                 \
     assert(kindIsValid());                                              \
-    m_hdr.mrb = true; /* can't pass a ref to a bitfield :( */           \
+    CountableManipNS::incRefCount(m_hdr.gcbyte);                        \
   }                                                                     \
   ALWAYS_INLINE bool decReleaseCheck() {                                \
     assert(!MemoryManager::sweeping());                                 \
     assert(kindIsValid());                                              \
-    return CountableManipNS::decReleaseCheck(m_hdr.mrb);                \
+    return CountableManipNS::decReleaseCheck(m_hdr.gcbyte);             \
   }                                                                     \
   ALWAYS_INLINE bool decRefAndRelease() {                               \
     assert(!MemoryManager::sweeping());                                 \
