@@ -419,6 +419,7 @@ void Marker::init() {
       case HK::Apc:
       case HK::Globals:
       case HK::Proxy:
+<<<<<<< HEAD
       case HK::Packed:
       case HK::Mixed:
       case HK::Struct:
@@ -426,6 +427,8 @@ void Marker::init() {
       case HK::String:
         assert(h->hdr_.count > 0);
         ptrs_.insert(h);
+=======
+>>>>>>> Fix inconsistent assumptions of tracing code vs. mrb code
         total_ += h->size();
         break;
       case HK::Ref:
