@@ -390,6 +390,10 @@ constexpr uint32_t kSmallSizeAlignMask = kSmallSizeAlign - 1;
 
 constexpr unsigned kLgSizeClassesPerDoubling = 2;
 
+constexpr unsigned kLineSize = 128;
+constexpr unsigned kBlockSize = 32768;
+constexpr unsigned kMaxMediumSize = 8192; //8kB is max medium object (1/4 of block size)
+
 /*
  * The maximum size where we use our custom allocator for request-local memory.
  *
@@ -481,6 +485,12 @@ struct MemBlock {
   size_t size; // bytes
 };
 
+struct ImmixBlock {
+  void* ptr;
+  size_t size; // should always be kBlockSize
+  uint8_t lineMap[kBlockSize / kLineSize]; // 256 lines per block for 32kB block
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -518,7 +528,7 @@ struct BigHeap {
   void enlist(BigNode*, HeaderKind kind, size_t size);
 
  protected:
-  std::vector<MemBlock> m_slabs;
+  std::vector<ImmixBlock> m_slabs;
   std::vector<BigNode*> m_bigs;
 };
 
@@ -668,25 +678,6 @@ struct MemoryManager {
    */
   void* objMalloc(size_t size);
   void objFree(void* vp, size_t size);
-
-  /*
-   * Allocate/deallocate by size class index.  This is useful when size
-   * class is already calculated at the call site.
-   */
-  void* mallocSmallIndex(size_t index, uint32_t size);
-  void freeSmallIndex(void* ptr, size_t index, uint32_t size);
-
-  /*
-   * These functions are useful when working directly with size classes outside
-   * this class.
-   *
-   * Note that we intentionally use size_t for size class index here, so that
-   * gcc would not generate inefficient code.
-   */
-  static size_t computeSmallSize2Index(uint32_t size);
-  static size_t lookupSmallSize2Index(uint32_t size);
-  static size_t smallSize2Index(uint32_t size);
-  static uint32_t smallIndex2Size(size_t index);
 
   /////////////////////////////////////////////////////////////////////////////
   // Cleanup.
@@ -966,6 +957,11 @@ private:
   void* malloc(size_t nbytes);
   void* realloc(void* ptr, size_t nbytes);
   void  free(void* ptr);
+
+  /* immix */
+  void* sequentialAllocate(uint32_t bytes);
+  void* allocSlowHot(uint32_t bytes);
+  void* overflowAlloc(uint32_t bytes);
 
   static uint32_t bsr(uint32_t x);
 

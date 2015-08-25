@@ -920,6 +920,102 @@ void* MemoryManager::mallocSmallSizeSlow(uint32_t bytes, unsigned index) {
   return slabAlloc(bytes, index);
 }
 
+inline void* MemoryManager::sequentialAllocate(void*& cursor, void* limit, 
+                                               uint32_t bytes) {
+  assert((uintptr_t(cursor) & kSmallSizeAlignMask) == 0);
+  assert((uintptr_t(limit) & kSmallSizeAlignMask) == 0);
+  assert(uintptr_t(cursor) < uintptr_t(limit));
+
+  auto space = uintptr_t(limit) - uintptr_t(cursor);
+  if (bytes <= space) {
+    // round to 16-byte alignment
+    auto aligned_bytes = (bytes + kSmallSizeAlignMask) & ~(kSmallSizeAlignMask);
+    // make sure I'm sane
+    assert((uintptr_t(aligned_bytes) & kSmallSizeAlignMask) == 0);
+
+    void* p = cursor;
+    cursor = (void*)(uintptr_t(cursor) + aligned_bytes);
+
+    assert(uintptr_t(p) + aligned_bytes == uintptr_t(cursor));
+    // the other assertions imply p is aligned here
+    return p;
+  }
+  return nullptr;
+}
+
+void* MemoryManager::getNextLineInBlock() {
+  // Starting at lineLimit, scan the line map for this block until we find a
+  // a line that is not marked, and then continue one line further (conservative
+  // , implicit marking). If we don't find a non-marked line, set lineCursor to 
+  // nullptr and return nullptr
+
+  // If we do fine a non-marked line, set lineCursor at the start of this line
+
+  // Continue until we find the next marked line or end of the block and set
+  // lineLimit there
+}
+
+void* MemoryManager::getNextRecyclableBlock() {
+  // Go through our recyclable blocks in address order, scanning the line map
+  // for each until we find a line that is not marked and then continue one line
+  // further (conservative, implicit marking). 
+
+  // Set set lineCursor at the start of this line and lineLimit at the start of
+  // the next marked line or the end of the block
+
+  // If there is not such a hole in any recyclable block, return nullptr
+}
+
+void* MemoryManager::getFreeBlock() {
+  if (debug && RuntimeOption::EvalCheckHeapOnAlloc) checkHeap();
+  auto block = m_heap.allocSlab(kBlockSize);
+  assert((uintptr_t(block.ptr) & kSmallSizeAlignMask) == 0);
+  
+  lineCursor = block.ptr;
+  lineLimit = (void*)(uintptr_t(block.ptr) + block.size);
+
+  return block.ptr;
+}
+
+/* 
+ * Finds the next line to allocate small objects into.
+ * Will look in the current block first, then the next
+ * recyclable block, then get a fresh block.
+ */
+void* MemoryManager::allocSlowHot(uint32_t bytes) {
+  getNextLineInBlock();
+  if (lineCursor == nullptr) {
+    getNextRecyclableBlock();
+    if (lineCursor == nullptr) {
+      auto block = getFreeBlock();
+      if (block == nullptr) {
+        return nullptr; //OOM
+      }
+    }
+  }
+  return mallocSmallSize(bytes);
+}
+
+/* 
+ * pre: bytes is the size of a medium allocation
+ */
+void* MemoryManager::overflowAlloc(uint32_t bytes) {
+  assert(bytes > kLineSize && bytes <= kMaxMediumSize);
+
+  void* p = sequentialAllocate(blockCursor, blockLimit, bytes);
+  if (p != nullptr) {
+    FTRACE(3, "overflowAlloc into block: {} -> {}\n", bytes, p);
+    return p;
+  }
+  // get a fresh block and allocate into it instead
+  auto block = getFreeBlock();
+  if (block == nullptr) {
+    return nullptr; //OOM
+  }
+  FTRACE(3, "overflowAlloc into *new* block: {} -> {}\n", bytes, p);
+  return sequentialAllocate(blockCursor, blockLimit, bytes);
+}
+
 inline void MemoryManager::updateBigStats() {
   // If we are using jemalloc, it is keeping track of allocations outside of
   // the slabs and the usage so we should force this after an allocation that
@@ -1164,14 +1260,16 @@ void BigHeap::reset() {
 
 void BigHeap::flush() {
   assert(empty());
-  m_slabs = std::vector<MemBlock>{};
+  m_slabs = std::vector<ImmixBlock>{};
   m_bigs = std::vector<BigNode*>{};
 }
 
 MemBlock BigHeap::allocSlab(size_t size) {
   void* slab = safe_malloc(size);
-  m_slabs.push_back({slab, size});
-  return {slab, size};
+  // probably not needed
+  uint8_t lineMap [kBlockSize / kLineSize] = {};
+  m_slabs.push_back({slab, size, lineMap});
+  return {slab, size, lineMap};
 }
 
 void BigHeap::enlist(BigNode* n, HeaderKind kind, size_t size) {

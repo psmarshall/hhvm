@@ -251,11 +251,20 @@ inline void* MemoryManager::mallocSmallIndex(size_t index, uint32_t bytes) {
   return p;
 }
 
+/* Entry point for all small + medium allocations */
 inline void* MemoryManager::mallocSmallSize(uint32_t bytes) {
   assert(bytes > 0);
-  assert(bytes <= kMaxSmallSize);
-  unsigned index = smallSize2Index(bytes);
-  return mallocSmallIndex(index, bytes);
+  assert(bytes <= kMaxMediumSize);
+
+  void* p = sequentialAllocate(lineCursor, lineLimit, bytes);
+  if (p != nullptr) {
+    FTRACE(3, "mallocSmallSize: {} -> {}\n", bytes, p);
+    return p;
+  }
+  if (bytes <= kLineSize) {
+    return allocSlowHot(bytes);
+  }
+  return overflowAlloc(bytes);
 }
 
 inline void MemoryManager::freeSmallIndex(void* ptr, size_t index,
