@@ -216,169 +216,6 @@ struct Allocator {
  *            than zero, and small enough that the contiguous regions fit within
  *            one slab.
  */
-#define SMALL_SIZES \
-/*         index, lg_grp, lg_delta, ndelta, lg_delta_lookup, ncontig */ \
-  SMALL_SIZE(  0,      4,        4,      0,  4,              32) \
-  SMALL_SIZE(  1,      4,        4,      1,  4,              32) \
-  SMALL_SIZE(  2,      4,        4,      2,  4,              32) \
-  SMALL_SIZE(  3,      4,        4,      3,  4,              32) \
-  \
-  SMALL_SIZE(  4,      6,        4,      1,  4,              24) \
-  SMALL_SIZE(  5,      6,        4,      2,  4,              24) \
-  SMALL_SIZE(  6,      6,        4,      3,  4,              24) \
-  SMALL_SIZE(  7,      6,        4,      4,  4,              24) \
-  \
-  SMALL_SIZE(  8,      7,        5,      1,  5,              16) \
-  SMALL_SIZE(  9,      7,        5,      2,  5,              16) \
-  SMALL_SIZE( 10,      7,        5,      3,  5,              16) \
-  SMALL_SIZE( 11,      7,        5,      4,  5,              16) \
-  \
-  SMALL_SIZE( 12,      8,        6,      1,  6,              12) \
-  SMALL_SIZE( 13,      8,        6,      2,  6,              12) \
-  SMALL_SIZE( 14,      8,        6,      3,  6,              12) \
-  SMALL_SIZE( 15,      8,        6,      4,  6,              12) \
-  \
-  SMALL_SIZE( 16,      9,        7,      1,  7,               8) \
-  SMALL_SIZE( 17,      9,        7,      2,  7,               8) \
-  SMALL_SIZE( 18,      9,        7,      3,  7,               8) \
-  SMALL_SIZE( 19,      9,        7,      4,  7,               8) \
-  \
-  SMALL_SIZE( 20,     10,        8,      1,  8,               6) \
-  SMALL_SIZE( 21,     10,        8,      2,  8,               6) \
-  SMALL_SIZE( 22,     10,        8,      3,  8,               6) \
-  SMALL_SIZE( 23,     10,        8,      4,  8,               6) \
-  \
-  SMALL_SIZE( 24,     11,        9,      1,  9,               4) \
-  SMALL_SIZE( 25,     11,        9,      2,  9,               4) \
-  SMALL_SIZE( 26,     11,        9,      3,  9,               4) \
-  SMALL_SIZE( 27,     11,        9,      4,  9,               4) \
-  \
-  SMALL_SIZE( 28,     12,       10,      1, no,               3) \
-  SMALL_SIZE( 29,     12,       10,      2, no,               3) \
-  SMALL_SIZE( 30,     12,       10,      3, no,               3) \
-  SMALL_SIZE( 31,     12,       10,      4, no,               3) \
-  \
-  SMALL_SIZE( 32,     13,       11,      1, no,               2) \
-  SMALL_SIZE( 33,     13,       11,      2, no,               2) \
-  SMALL_SIZE( 34,     13,       11,      3, no,               2) \
-  SMALL_SIZE( 35,     13,       11,      4, no,               2) \
-  \
-  SMALL_SIZE( 36,     14,       12,      1, no,               2) \
-  SMALL_SIZE( 37,     14,       12,      2, no,               2) \
-  SMALL_SIZE( 38,     14,       12,      3, no,               2) \
-  SMALL_SIZE( 39,     14,       12,      4, no,               2) \
-  \
-  SMALL_SIZE( 40,     15,       13,      1, no,               2) \
-  SMALL_SIZE( 41,     15,       13,      2, no,               2) \
-  SMALL_SIZE( 42,     15,       13,      3, no,               2) \
-  SMALL_SIZE( 43,     15,       13,      4, no,               2) \
-  \
-  SMALL_SIZE( 44,     16,       14,      1, no,               2) \
-  SMALL_SIZE( 45,     16,       14,      2, no,               2) \
-  SMALL_SIZE( 46,     16,       14,      3, no,               2) \
-  SMALL_SIZE( 47,     16,       14,      4, no,               2) \
-  \
-  SMALL_SIZE( 48,     17,       15,      1, no,               2) \
-  SMALL_SIZE( 49,     17,       15,      2, no,               2) \
-  SMALL_SIZE( 50,     17,       15,      3, no,               2) \
-  SMALL_SIZE( 51,     17,       15,      4, no,               2) \
-  \
-  SMALL_SIZE( 52,     18,       16,      1, no,               2) \
-  SMALL_SIZE( 53,     18,       16,      2, no,               2) \
-  SMALL_SIZE( 54,     18,       16,      3, no,               2) \
-  SMALL_SIZE( 55,     18,       16,      4, no,               2) \
-  \
-  SMALL_SIZE( 56,     19,       17,      1, no,               2) \
-  SMALL_SIZE( 57,     19,       17,      2, no,               2) \
-  SMALL_SIZE( 58,     19,       17,      3, no,               2) \
-  SMALL_SIZE( 59,     19,       17,      4, no,               1) \
-  \
-  SMALL_SIZE( 60,     20,       18,      1, no,               1) \
-  SMALL_SIZE( 61,     20,       18,      2, no,               1) \
-  SMALL_SIZE( 62,     20,       18,      3, no,               1) \
-  SMALL_SIZE( 63,     20,       18,      4, no,               1) \
-  \
-  SMALL_SIZE( 64,     21,       19,      1, no,               1) \
-  SMALL_SIZE( 65,     21,       19,      2, no,               1) \
-  SMALL_SIZE( 66,     21,       19,      3, no,               1) \
-  SMALL_SIZE( 67,     21,       19,      4, no,               1) \
-  \
-  SMALL_SIZE( 68,     22,       20,      1, no,               1) \
-  SMALL_SIZE( 69,     22,       20,      2, no,               1) \
-  SMALL_SIZE( 70,     22,       20,      3, no,               1) \
-  SMALL_SIZE( 71,     22,       20,      4, no,               1) \
-  \
-  SMALL_SIZE( 72,     23,       21,      1, no,               1) \
-  SMALL_SIZE( 73,     23,       21,      2, no,               1) \
-  SMALL_SIZE( 74,     23,       21,      3, no,               1) \
-  SMALL_SIZE( 75,     23,       21,      4, no,               1) \
-  \
-  SMALL_SIZE( 76,     24,       22,      1, no,               1) \
-  SMALL_SIZE( 77,     24,       22,      2, no,               1) \
-  SMALL_SIZE( 78,     24,       22,      3, no,               1) \
-  SMALL_SIZE( 79,     24,       22,      4, no,               1) \
-  \
-  SMALL_SIZE( 80,     25,       23,      1, no,               1) \
-  SMALL_SIZE( 81,     25,       23,      2, no,               1) \
-  SMALL_SIZE( 82,     25,       23,      3, no,               1) \
-  SMALL_SIZE( 83,     25,       23,      4, no,               1) \
-  \
-  SMALL_SIZE( 84,     26,       24,      1, no,               1) \
-  SMALL_SIZE( 85,     26,       24,      2, no,               1) \
-  SMALL_SIZE( 86,     26,       24,      3, no,               1) \
-  SMALL_SIZE( 87,     26,       24,      4, no,               1) \
-  \
-  SMALL_SIZE( 88,     27,       25,      1, no,               1) \
-  SMALL_SIZE( 89,     27,       25,      2, no,               1) \
-  SMALL_SIZE( 90,     27,       25,      3, no,               1) \
-  SMALL_SIZE( 91,     27,       25,      4, no,               1) \
-  \
-  SMALL_SIZE( 92,     28,       26,      1, no,               1) \
-  SMALL_SIZE( 93,     28,       26,      2, no,               1) \
-  SMALL_SIZE( 94,     28,       26,      3, no,               1) \
-  SMALL_SIZE( 95,     28,       26,      4, no,               1) \
-  \
-  SMALL_SIZE( 96,     29,       27,      1, no,               1) \
-  SMALL_SIZE( 97,     29,       27,      2, no,               1) \
-  SMALL_SIZE( 98,     29,       27,      3, no,               1) \
-  SMALL_SIZE( 99,     29,       27,      4, no,               1) \
-  \
-  SMALL_SIZE(100,     30,       28,      1, no,               1) \
-  SMALL_SIZE(101,     30,       28,      2, no,               1) \
-  SMALL_SIZE(102,     30,       28,      3, no,               1) \
-  SMALL_SIZE(103,     30,       28,      4, no,               1) \
-  \
-  SMALL_SIZE(104,     31,       29,      1, no,               1) \
-  SMALL_SIZE(105,     31,       29,      2, no,               1) \
-  SMALL_SIZE(106,     31,       29,      3, no,               1) \
-
-alignas(64) constexpr uint8_t kSmallSize2Index[] = {
-#define S2I_4(i)  i,
-#define S2I_5(i)  S2I_4(i) S2I_4(i)
-#define S2I_6(i)  S2I_5(i) S2I_5(i)
-#define S2I_7(i)  S2I_6(i) S2I_6(i)
-#define S2I_8(i)  S2I_7(i) S2I_7(i)
-#define S2I_9(i)  S2I_8(i) S2I_8(i)
-#define S2I_no(i)
-#define SMALL_SIZE(index, lg_grp, lg_delta, ndelta, lg_delta_lookup, ncontig) \
-  S2I_##lg_delta_lookup(index)
-  SMALL_SIZES
-#undef S2I_4
-#undef S2I_5
-#undef S2I_6
-#undef S2I_7
-#undef S2I_8
-#undef S2I_9
-#undef S2I_no
-#undef SMALL_SIZE
-};
-
-alignas(64) constexpr uint32_t kSmallIndex2Size[] = {
-#define SMALL_SIZE(index, lg_grp, lg_delta, ndelta, lg_delta_lookup, ncontig) \
-  ((uint32_t{1}<<lg_grp) + (uint32_t{ndelta}<<lg_delta)),
-  SMALL_SIZES
-#undef SMALL_SIZE
-};
 
 constexpr uint32_t kMaxSmallSizeLookup = 4096;
 
@@ -393,26 +230,6 @@ constexpr unsigned kLgSizeClassesPerDoubling = 2;
 constexpr unsigned kLineSize = 128;
 constexpr unsigned kBlockSize = 32768;
 constexpr unsigned kMaxMediumSize = 8192; //8kB is max medium object (1/4 of block size)
-
-/*
- * The maximum size where we use our custom allocator for request-local memory.
- *
- * Allocations larger than this size go to the underlying malloc implementation,
- * and certain specialized allocator functions have preconditions about the
- * requested size being above or below this number to avoid checking at runtime.
- *
- * We want kMaxSmallSize to be the largest size-class less than kSlabSize.
- */
-constexpr uint32_t kNumSmallSizes = 63;
-static_assert(kNumSmallSizes <= (1 << 6),
-              "only 6 bits available in HeaderWord");
-
-constexpr uint32_t kMaxSmallSize = kSmallIndex2Size[kNumSmallSizes-1];
-static_assert(kMaxSmallSize > kSmallSizeAlign * 2,
-              "Too few size classes");
-static_assert(kMaxSmallSize < kSlabSize, "fix kNumSmallSizes or kLgSlabSize");
-static_assert(kNumSmallSizes <= sizeof(kSmallSize2Index),
-              "Extend SMALL_SIZES table");
 
 constexpr unsigned kSmallPreallocCountLimit = 8;
 constexpr uint32_t kSmallPreallocBytesLimit = uint32_t{1} << 9;
@@ -497,7 +314,7 @@ struct ImmixBlock {
  * Allocator for slabs and big blocks.
  */
 struct BigHeap {
-  BigHeap() {}
+  BigHeap() {m_pos = 0;}
   bool empty() const {
     return m_slabs.empty() && m_bigs.empty();
   }
@@ -505,8 +322,13 @@ struct BigHeap {
   // return true if ptr points into one of the slabs
   bool contains(void* ptr) const;
 
+  void markLineContaining(void* p);
+
   // allocate a MemBlock of at least size bytes, track in m_slabs.
   MemBlock allocSlab(size_t size);
+
+  // the next recyclable block
+  ImmixBlock getNextRecyclableBlock();
 
   // allocation api for big blocks. These get a BigNode header and
   // are tracked in m_bigs
@@ -529,6 +351,7 @@ struct BigHeap {
 
  protected:
   std::vector<ImmixBlock> m_slabs;
+  uint32_t m_pos;
   std::vector<BigNode*> m_bigs;
 };
 
@@ -611,16 +434,6 @@ struct MemoryManager {
 
   /////////////////////////////////////////////////////////////////////////////
   // Allocation.
-
-  /*
-   * Return the size class for a given requested small-allocation size.
-   *
-   * The return value is greater than or equal to the parameter, and
-   * less than or equal to kMaxSmallSize.
-   *
-   * Pre: requested <= kMaxSmallSize
-   */
-  static uint32_t smallSizeClass(uint32_t requested);
 
   /*
    * Return a lower bound estimate of the capacity that will be returned for
@@ -892,6 +705,11 @@ struct MemoryManager {
   template<class Fn> void forEachObject(Fn);
 
   /*
+   * Line marking
+   */
+  void markLineContaining(void* p);
+
+  /*
    * Run the experimental collector.
    */
   void collect();
@@ -903,12 +721,6 @@ private:
   friend void* req::calloc(size_t count, size_t bytes);
   friend void* req::realloc(void* ptr, size_t nbytes);
   friend void  req::free(void* ptr);
-
-  struct FreeList {
-    void* maybePop();
-    void push(void*, size_t size);
-    FreeNode* head = nullptr;
-  };
 
   // head node of the doubly-linked list of Sweepables
   struct SweepableList : Sweepable {
@@ -945,12 +757,7 @@ private:
   MemoryManager& operator=(const MemoryManager&) = delete;
 
 private:
-  void* slabAlloc(uint32_t bytes, unsigned index);
   void* newSlab(uint32_t nbytes);
-  void storeTail(void* tail, uint32_t tailBytes);
-  void splitTail(void* tail, uint32_t tailBytes, unsigned nSplit,
-                 uint32_t splitUsable, unsigned splitInd);
-  void* mallocSmallSizeSlow(uint32_t bytes, unsigned index);
   void  updateBigStats();
   void* mallocBig(size_t nbytes);
   void* callocBig(size_t nbytes);
@@ -959,7 +766,10 @@ private:
   void  free(void* ptr);
 
   /* immix */
-  void* sequentialAllocate(uint32_t bytes);
+  void* sequentialAllocate(void*& cursor, void* limit, uint32_t bytes);
+  void* getNextLineInBlock();
+  void* getNextRecyclableBlock();
+  void* getFreeBlock();
   void* allocSlowHot(uint32_t bytes);
   void* overflowAlloc(uint32_t bytes);
 
@@ -1036,9 +846,8 @@ private:
 private:
   TRACE_SET_MOD(mm);
 
-  void* m_front;
-  void* m_limit;
-  std::array<FreeList,kNumSmallSizes> m_freelists;
+  void* lineCursor;
+  void* lineLimit;
   StringDataNode m_strings; // in-place node is head of circular list
   std::vector<APCLocalArray*> m_apc_arrays;
   MemoryUsageStats m_stats;

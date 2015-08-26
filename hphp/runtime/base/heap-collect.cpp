@@ -210,6 +210,8 @@ bool Marker::mark(const void* p) {
   assert(h->kind() <= HK::BigMalloc && h->kind() != HK::ResumableObj);
   auto first = !h->hdr_.mark;
   h->hdr_.mark = true;
+  // mark our line... somehow
+  MM().markLineContaining(p);
   return first;
 }
 

@@ -785,141 +785,6 @@ NEVER_INLINE void* MemoryManager::newSlab(uint32_t nbytes) {
   return slab.ptr;
 }
 
-/*
- * Allocate `bytes' from the current slab, aligned to kSmallSizeAlign.
- */
-inline void* MemoryManager::slabAlloc(uint32_t bytes, unsigned index) {
-  FTRACE(3, "slabAlloc({}, {}): m_front={}, m_limit={}\n", bytes, index,
-            m_front, m_limit);
-  uint32_t nbytes = smallIndex2Size(index);
-
-  assert(bytes <= nbytes);
-  assert(nbytes <= kSlabSize);
-  assert((nbytes & kSmallSizeAlignMask) == 0);
-  assert((uintptr_t(m_front) & kSmallSizeAlignMask) == 0);
-
-  if (UNLIKELY(m_bypassSlabAlloc)) {
-    // Stats correction; mallocBigSize() pulls stats from jemalloc.
-    m_stats.usage -= bytes;
-    return mallocBigSize<false>(nbytes).ptr;
-  }
-
-  void* ptr = m_front;
-  {
-    void* next = (void*)(uintptr_t(ptr) + nbytes);
-    if (uintptr_t(next) <= uintptr_t(m_limit)) {
-      m_front = next;
-    } else {
-      ptr = newSlab(nbytes);
-    }
-  }
-  // Preallocate more of the same in order to amortize entry into this method.
-  unsigned nPrealloc;
-  if (nbytes * kSmallPreallocCountLimit <= kSmallPreallocBytesLimit) {
-    nPrealloc = kSmallPreallocCountLimit;
-  } else {
-    nPrealloc = kSmallPreallocBytesLimit / nbytes;
-  }
-  {
-    void* front = (void*)(uintptr_t(m_front) + nPrealloc*nbytes);
-    if (uintptr_t(front) > uintptr_t(m_limit)) {
-      nPrealloc = ((uintptr_t)m_limit - uintptr_t(m_front)) / nbytes;
-      front = (void*)(uintptr_t(m_front) + nPrealloc*nbytes);
-    }
-    m_front = front;
-  }
-  for (void* p = (void*)(uintptr_t(m_front) - nbytes); p != ptr;
-       p = (void*)(uintptr_t(p) - nbytes)) {
-    m_freelists[index].push(p, nbytes);
-  }
-  FTRACE(4, "slabAlloc({}, {}) --> ptr={}, m_front={}, m_limit={}\n", bytes,
-            index, ptr, m_front, m_limit);
-  return ptr;
-}
-
-/*
- * Store slab tail bytes (if any) in freelists.
- */
-inline void MemoryManager::storeTail(void* tail, uint32_t tailBytes) {
-  void* rem = tail;
-  for (uint32_t remBytes = tailBytes; remBytes > 0;) {
-    uint32_t fragBytes = remBytes;
-    assert(fragBytes >= kSmallSizeAlign);
-    assert((fragBytes & kSmallSizeAlignMask) == 0);
-    unsigned fragInd = smallSize2Index(fragBytes + 1) - 1;
-    uint32_t fragUsable = smallIndex2Size(fragInd);
-    void* frag = (void*)(uintptr_t(rem) + remBytes - fragUsable);
-    FTRACE(4, "MemoryManager::storeTail({}, {}): rem={}, remBytes={}, "
-              "frag={}, fragBytes={}, fragUsable={}, fragInd={}\n", tail,
-              (void*)uintptr_t(tailBytes), rem, (void*)uintptr_t(remBytes),
-              frag, (void*)uintptr_t(fragBytes), (void*)uintptr_t(fragUsable),
-              fragInd);
-    m_freelists[fragInd].push(frag, fragUsable);
-    remBytes -= fragUsable;
-  }
-}
-
-/*
- * Create nSplit contiguous regions and store them in the appropriate freelist.
- */
-inline void MemoryManager::splitTail(void* tail, uint32_t tailBytes,
-                                     unsigned nSplit, uint32_t splitUsable,
-                                     unsigned splitInd) {
-  assert(tailBytes >= kSmallSizeAlign);
-  assert((tailBytes & kSmallSizeAlignMask) == 0);
-  assert((splitUsable & kSmallSizeAlignMask) == 0);
-  assert(nSplit * splitUsable <= tailBytes);
-  for (uint32_t i = nSplit; i--;) {
-    void* split = (void*)(uintptr_t(tail) + i * splitUsable);
-    FTRACE(4, "MemoryManager::splitTail(tail={}, tailBytes={}, tailPast={}): "
-              "split={}, splitUsable={}, splitInd={}\n", tail,
-              (void*)uintptr_t(tailBytes), (void*)(uintptr_t(tail) + tailBytes),
-              split, splitUsable, splitInd);
-    m_freelists[splitInd].push(split, splitUsable);
-  }
-  void* rem = (void*)(uintptr_t(tail) + nSplit * splitUsable);
-  assert(tailBytes >= nSplit * splitUsable);
-  uint32_t remBytes = tailBytes - nSplit * splitUsable;
-  assert(uintptr_t(rem) + remBytes == uintptr_t(tail) + tailBytes);
-  storeTail(rem, remBytes);
-}
-
-void* MemoryManager::mallocSmallSizeSlow(uint32_t bytes, unsigned index) {
-  size_t nbytes = smallIndex2Size(index);
-  static constexpr unsigned nContigTab[] = {
-#define SMALL_SIZE(index, lg_grp, lg_delta, ndelta, lg_delta_lookup, ncontig) \
-    ncontig,
-  SMALL_SIZES
-#undef SMALL_SIZE
-  };
-  unsigned nContig = nContigTab[index];
-  size_t contigMin = nContig * nbytes;
-  unsigned contigInd = smallSize2Index(contigMin);
-  for (unsigned i = contigInd; i < kNumSmallSizes; ++i) {
-    FTRACE(4, "MemoryManager::mallocSmallSizeSlow({}-->{}, {}): contigMin={}, "
-              "contigInd={}, try i={}\n", bytes, nbytes, index, contigMin,
-              contigInd, i);
-    void* p = m_freelists[i].maybePop();
-    if (p != nullptr) {
-      FTRACE(4, "MemoryManager::mallocSmallSizeSlow({}-->{}, {}): "
-                "contigMin={}, contigInd={}, use i={}, size={}, p={}\n", bytes,
-                nbytes, index, contigMin, contigInd, i, smallIndex2Size(i),
-                p);
-      // Split tail into preallocations and store them back into freelists.
-      uint32_t availBytes = smallIndex2Size(i);
-      uint32_t tailBytes = availBytes - nbytes;
-      if (tailBytes > 0) {
-        void* tail = (void*)(uintptr_t(p) + nbytes);
-        splitTail(tail, tailBytes, nContig - 1, nbytes, index);
-      }
-      return p;
-    }
-  }
-
-  // No available free list items; carve new space from the current slab.
-  return slabAlloc(bytes, index);
-}
-
 inline void* MemoryManager::sequentialAllocate(void*& cursor, void* limit, 
                                                uint32_t bytes) {
   assert((uintptr_t(cursor) & kSmallSizeAlignMask) == 0);
@@ -953,6 +818,9 @@ void* MemoryManager::getNextLineInBlock() {
 
   // Continue until we find the next marked line or end of the block and set
   // lineLimit there
+
+  // just skip to the next block for now
+  return nullptr;
 }
 
 void* MemoryManager::getNextRecyclableBlock() {
@@ -964,13 +832,42 @@ void* MemoryManager::getNextRecyclableBlock() {
   // the next marked line or the end of the block
 
   // If there is not such a hole in any recyclable block, return nullptr
+
+  while (true) {
+    block = m_heap.getNextRecyclableBlock();
+    if (block.ptr == nullptr) {
+      lineCursor = nullptr;
+      return nullptr;
+    }
+    for (uint32_t i = 0; i < block.size / kLineSize; i++) {
+      // FIXME so I don't skip first line of block due to implicit marking
+      if ((uint8_t)block.lineMap[i] == 0 && i < (block.size / kLineSize) - 1) {
+        // check implicit conservative mark on the next line
+        if ((uint8_t)block.lineMap[i+1] == 0) {
+          lineCursor = (void*)(uintptr_t(block.ptr) + ((i+1) * kLineSize));
+          // find the end of our free lines
+          for (uint32_t j = i+2; j < block.size / kLineSize; j++) {
+            if ((uint8_t)block.lineMap[j] != 0) {
+              // reached a marked line
+              lineLimit = (void*)(uintptr_t(block.ptr) + (j * kLineSize));
+              return lineCursor;
+            }
+          }
+          // reached the end of the block without finding a marked line
+          lineLimit = (void*)(uintptr_t(block.ptr) + block.size);
+          return lineCursor;
+        }
+      }
+    }
+
+  }
 }
 
 void* MemoryManager::getFreeBlock() {
   if (debug && RuntimeOption::EvalCheckHeapOnAlloc) checkHeap();
   auto block = m_heap.allocSlab(kBlockSize);
   assert((uintptr_t(block.ptr) & kSmallSizeAlignMask) == 0);
-  
+
   lineCursor = block.ptr;
   lineLimit = (void*)(uintptr_t(block.ptr) + block.size);
 
@@ -1264,12 +1161,20 @@ void BigHeap::flush() {
   m_bigs = std::vector<BigNode*>{};
 }
 
-MemBlock BigHeap::allocSlab(size_t size) {
+ImmixBlock BigHeap::allocSlab(size_t size) {
   void* slab = safe_malloc(size);
   // probably not needed
   uint8_t lineMap [kBlockSize / kLineSize] = {};
   m_slabs.push_back({slab, size, lineMap});
   return {slab, size, lineMap};
+}
+
+ImmixBlock BigHeap::getNextRecyclableBlock() {
+  if (m_pos < m_slabs.size()) {
+    return m_slabs[m_pos++];
+  }
+  uint8_t lineMap [kBlockSize / kLineSize] = {};
+  return {nullptr, 0, lineMap};
 }
 
 void BigHeap::enlist(BigNode* n, HeaderKind kind, size_t size) {
@@ -1301,12 +1206,25 @@ MemBlock BigHeap::callocBig(size_t nbytes) {
 bool BigHeap::contains(void* ptr) const {
   auto const ptrInt = reinterpret_cast<uintptr_t>(ptr);
   auto it = std::find_if(std::begin(m_slabs), std::end(m_slabs),
-    [&] (MemBlock slab) {
+    [&] (ImmixBlock slab) {
       auto const baseInt = reinterpret_cast<uintptr_t>(slab.ptr);
       return ptrInt >= baseInt && ptrInt < baseInt + slab.size;
     }
   );
   return it != std::end(m_slabs);
+}
+
+void BigHeap::markLineContaining(void* p) {
+  auto const ptrInt = reinterpret_cast<uintptr_t>(p);
+  auto it = std::find_if(std::begin(m_slabs), std::end(m_slabs),
+    [&] (ImmixBlock slab) {
+      auto const baseInt = reinterpret_cast<uintptr_t>(slab.ptr);
+      return ptrInt >= baseInt && ptrInt < baseInt + slab.size;
+    }
+  );
+  assert(it != std::end(m_slabs));
+  lineNum = (ptrInt - uintptr_t(it->ptr)) / 128;
+  it->lineMap[lineNum] = 1; //mark the line
 }
 
 NEVER_INLINE

@@ -27,7 +27,7 @@ namespace HPHP {
 //////////////////////////////////////////////////////////////////////
 
 static_assert(
-  kMaxSmallSize <= std::numeric_limits<uint32_t>::max(),
+  kMaxMediumSize <= std::numeric_limits<uint32_t>::max(),
   "Size-specified small block alloc functions assume this"
 );
 
@@ -143,25 +143,6 @@ inline int operator<<(HeaderKind k, int bits) {
   return int(k) << bits;
 }
 
-inline void* MemoryManager::FreeList::maybePop() {
-  auto ret = head;
-  if (LIKELY(ret != nullptr)) head = ret->next;
-  FTRACE(4, "FreeList::maybePop(): returning {}\n", ret);
-  return ret;
-}
-
-inline void MemoryManager::FreeList::push(void* val, size_t size) {
-  FTRACE(4, "FreeList::push({}, {}), prev head = {}\n", val, size, head);
-  auto constexpr kMaxFreeSize = std::numeric_limits<uint32_t>::max();
-  static_assert(kMaxSmallSize <= kMaxFreeSize, "");
-  assert(size > 0 && size <= kMaxFreeSize);
-  auto const node = static_cast<FreeNode*>(val);
-  node->next = head;
-  // The extra store to initialize a free header here is expensive.
-  // Instead, initFree() initializes all free headers just before iterating
-  head = node;
-}
-
 //////////////////////////////////////////////////////////////////////
 
 inline uint32_t MemoryManager::estimateCap(uint32_t requested) {
@@ -183,74 +164,6 @@ inline uint32_t MemoryManager::bsr(uint32_t x) {
 #endif
 }
 
-inline size_t MemoryManager::computeSmallSize2Index(uint32_t size) {
-  uint32_t x = bsr((size<<1)-1);
-  uint32_t shift = (x < kLgSizeClassesPerDoubling + kLgSmallSizeQuantum)
-                   ? 0 : x - (kLgSizeClassesPerDoubling + kLgSmallSizeQuantum);
-  uint32_t grp = shift << kLgSizeClassesPerDoubling;
-
-  int32_t lgReduced = x - kLgSizeClassesPerDoubling
-                      - 1; // Counteract left shift of bsr() argument.
-  uint32_t lgDelta = (lgReduced < int32_t(kLgSmallSizeQuantum))
-                     ? kLgSmallSizeQuantum : lgReduced;
-  uint32_t deltaInverseMask = -1 << lgDelta;
-  constexpr uint32_t kModMask = (1u << kLgSizeClassesPerDoubling) - 1;
-  uint32_t mod = ((((size-1) & deltaInverseMask) >> lgDelta)) & kModMask;
-
-  auto const index = grp + mod;
-  assert(index < kNumSmallSizes);
-  return index;
-}
-
-inline size_t MemoryManager::lookupSmallSize2Index(uint32_t size) {
-  auto const index = kSmallSize2Index[(size-1) >> kLgSmallSizeQuantum];
-  assert(index == computeSmallSize2Index(size));
-  return index;
-}
-
-inline size_t MemoryManager::smallSize2Index(uint32_t size) {
-  assert(size > 0);
-  assert(size <= kMaxSmallSize);
-  if (LIKELY(size <= kMaxSmallSizeLookup)) {
-    return lookupSmallSize2Index(size);
-  }
-  return computeSmallSize2Index(size);
-}
-
-inline uint32_t MemoryManager::smallIndex2Size(size_t index) {
-  return kSmallIndex2Size[index];
-}
-
-inline uint32_t MemoryManager::smallSizeClass(uint32_t reqBytes) {
-  uint32_t x = bsr((reqBytes<<1)-1);
-  int32_t lgReduced = x - kLgSizeClassesPerDoubling
-                      - 1; // Counteract left shift of bsr() argument.
-  uint32_t lgDelta = (lgReduced < int32_t(kLgSmallSizeQuantum))
-                      ? kLgSmallSizeQuantum : lgReduced;
-  uint32_t delta = 1u << lgDelta;
-  uint32_t deltaMask = delta - 1;
-  auto const ret = (reqBytes + deltaMask) & ~deltaMask;
-  assert(ret <= kMaxSmallSize);
-  return ret;
-}
-
-inline void* MemoryManager::mallocSmallIndex(size_t index, uint32_t bytes) {
-  assert(index < kNumSmallSizes);
-  assert(bytes <= kSmallIndex2Size[index]);
-
-  if (debug) eagerGCCheck();
-
-  m_stats.usage += bytes;
-
-  void *p = m_freelists[index].maybePop();
-  if (UNLIKELY(p == nullptr)) {
-    p = mallocSmallSizeSlow(bytes, index);
-  }
-  assert((reinterpret_cast<uintptr_t>(p) & kSmallSizeAlignMask) == 0);
-  FTRACE(3, "mallocSmallSize: {} -> {}\n", bytes, p);
-  return p;
-}
-
 /* Entry point for all small + medium allocations */
 inline void* MemoryManager::mallocSmallSize(uint32_t bytes) {
   assert(bytes > 0);
@@ -261,30 +174,11 @@ inline void* MemoryManager::mallocSmallSize(uint32_t bytes) {
     FTRACE(3, "mallocSmallSize: {} -> {}\n", bytes, p);
     return p;
   }
-  if (bytes <= kLineSize) {
+  // if (bytes <= kLineSize) {
     return allocSlowHot(bytes);
-  }
-  return overflowAlloc(bytes);
-}
-
-inline void MemoryManager::freeSmallIndex(void* ptr, size_t index,
-                                          uint32_t bytes) {
-  assert(index < kNumSmallSizes);
-  assert((reinterpret_cast<uintptr_t>(ptr) & kSmallSizeAlignMask) == 0);
-  assert(bytes <= kSmallIndex2Size[index]);
-
-  if (UNLIKELY(m_bypassSlabAlloc)) {
-    return freeBigSize(ptr, bytes);
-  }
-
-  if (debug) eagerGCCheck();
-
-  FTRACE(3, "freeSmallSize({}, {}), freelist {}\n", ptr, bytes, index);
-
-  m_freelists[index].push(ptr, bytes);
-  m_stats.usage -= bytes;
-
-  FTRACE(3, "freeSmallSize: {} ({} bytes)\n", ptr, bytes);
+  // }
+  // Don't overflow alloc yet
+  // return overflowAlloc(bytes);
 }
 
 inline void MemoryManager::freeSmallSize(void* ptr, uint32_t bytes) {
@@ -323,13 +217,13 @@ void MemoryManager::freeBigSize(void* vp, size_t bytes) {
 
 ALWAYS_INLINE
 void* MemoryManager::objMalloc(size_t size) {
-  if (LIKELY(size <= kMaxSmallSize)) return mallocSmallSize(size);
+  if (LIKELY(size <= kMaxMediumSize)) return mallocSmallSize(size);
   return mallocBigSize<false>(size).ptr;
 }
 
 ALWAYS_INLINE
 void MemoryManager::objFree(void* vp, size_t size) {
-  if (LIKELY(size <= kMaxSmallSize)) return freeSmallSize(vp, size);
+  if (LIKELY(size <= kMaxMediumSize)) return freeSmallSize(vp, size);
   freeBigSize(vp, size);
 }
 
@@ -412,6 +306,10 @@ inline bool MemoryManager::empty() const {
 
 inline bool MemoryManager::contains(void *p) const {
   return m_heap.contains(p);
+}
+
+inline void MemoryManager::markLineContaining(void *p) {
+  return m_heap.markLineContaining(p);
 }
 
 inline bool MemoryManager::checkContains(void* p) const {

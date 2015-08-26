@@ -186,7 +186,8 @@ template<class Fn> void BigHeap::iterate(Fn fn) {
       // so don't round them.
       auto size = hdr->hdr_.kind == HeaderKind::Hole ||
                   hdr->hdr_.kind == HeaderKind::Free ? hdr->free_.size() :
-                  MemoryManager::smallSizeClass(hdr->size());
+                  hdr->size(); 
+      assert(size % 16 == 0); // TODO round to 16 byte align?
       hdr = (Header*)((char*)hdr + size);
       if (hdr >= slab_end) {
         assert(hdr == slab_end && "hdr > slab_end indicates corruption");
