@@ -2697,7 +2697,7 @@ void CodeGenerator::cgNewInstanceRaw(IRInstruction* inst) {
   auto const dstReg = dstLoc(inst, 0).reg();
   size_t size = ObjectData::sizeForNProps(cls->numDeclProperties());
   cgCallHelper(vmain(),
-               size <= kMaxSmallSize
+               size <= kMaxMediumSize
                ? CppCall::direct(ObjectData::newInstanceRaw)
                : CppCall::direct(ObjectData::newInstanceRawBig),
                callDest(dstReg),

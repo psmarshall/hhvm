@@ -161,12 +161,6 @@ void MemoryManager::threadStats(uint64_t*& allocated, uint64_t*& deallocated,
 #endif
 
 static void* MemoryManagerInit() {
-  // We store the free list pointers right at the start of each
-  // object (overlapping whatever it's first word holds), and we also clobber
-  // _count as a free-object flag when the object is deallocated. This
-  // assert just makes sure they don't overflow.
-  assert(FAST_REFCOUNT_OFFSET + sizeof(int) <=
-    MemoryManager::smallSizeClass(1));
   MemoryManager::TlsWrapper tls;
   return (void*)tls.getNoCheck;
 }
@@ -186,8 +180,8 @@ void MemoryManager::OnThreadExit(MemoryManager* mm) {
 }
 
 MemoryManager::MemoryManager()
-    : m_front(nullptr)
-    , m_limit(nullptr)
+    : m_lineCursor(nullptr)
+    , m_lineLimit(nullptr)
     , m_sweeping(false) {
 #ifdef USE_JEMALLOC
   threadStats(m_allocated, m_deallocated, m_cactive, m_cactiveLimit);
@@ -527,9 +521,7 @@ void MemoryManager::resetAllocator() {
   // free the heap
   m_heap.reset();
 
-  // zero out freelists
-  for (auto& i : m_freelists) i.head = nullptr;
-  m_front = m_limit = 0;
+  m_lineCursor = m_lineLimit = nullptr;
   m_needInitFree = false;
 
   resetStatsImpl(true);
@@ -593,7 +585,7 @@ void MemoryManager::flush() {
 
 inline void* MemoryManager::malloc(size_t nbytes) {
   auto const nbytes_padded = nbytes + sizeof(SmallNode);
-  if (LIKELY(nbytes_padded) <= kMaxSmallSize) {
+  if (LIKELY(nbytes_padded) <= kMaxMediumSize) {
     auto const ptr = static_cast<SmallNode*>(mallocSmallSize(nbytes_padded));
     ptr->padbytes = nbytes_padded;
     ptr->hdr.kind = HeaderKind::SmallMalloc;
@@ -613,7 +605,7 @@ inline void MemoryManager::free(void* ptr) {
   assert(ptr != 0);
   auto const n = static_cast<MallocNode*>(ptr) - 1;
   auto const padbytes = n->small.padbytes;
-  if (LIKELY(padbytes <= kMaxSmallSize)) {
+  if (LIKELY(padbytes <= kMaxMediumSize)) {
     return freeSmallSize(&n->small, n->small.padbytes);
   }
   m_heap.freeBig(ptr);
@@ -623,7 +615,7 @@ inline void* MemoryManager::realloc(void* ptr, size_t nbytes) {
   FTRACE(3, "MemoryManager::realloc: {} to {}\n", ptr, nbytes);
   assert(nbytes > 0);
   auto const n = static_cast<MallocNode*>(ptr) - 1;
-  if (LIKELY(n->small.padbytes <= kMaxSmallSize)) {
+  if (LIKELY(n->small.padbytes <= kMaxMediumSize)) {
     void* newmem = req::malloc(nbytes);
     auto const copySize = std::min(
       n->small.padbytes - sizeof(SmallNode),
@@ -649,30 +641,6 @@ const char* header_names[] = {
   "Free", "Hole"
 };
 static_assert(sizeof(header_names)/sizeof(*header_names) == NumHeaderKinds, "");
-
-// initialize a Hole header in the unused memory between m_front and m_limit
-void MemoryManager::initHole(void* ptr, uint32_t size) {
-  auto hdr = static_cast<FreeNode*>(ptr);
-  hdr->hdr.kind = HeaderKind::Hole;
-  hdr->size() = size;
-}
-
-void MemoryManager::initHole() {
-  if ((char*)m_front < (char*)m_limit) {
-    initHole(m_front, (char*)m_limit - (char*)m_front);
-  }
-}
-
-// initialize the FreeNode header on all freelist entries.
-void MemoryManager::initFree() {
-  initHole();
-  for (auto i = 0; i < kNumSmallSizes; i++) {
-    for (auto n = m_freelists[i].head; n; n = n->next) {
-      n->hdr.initFree(smallIndex2Size(i));
-    }
-  }
-  m_needInitFree = false;
-}
 
 // test iterating objects in slabs
 void MemoryManager::checkHeap() {
@@ -728,15 +696,6 @@ void MemoryManager::checkHeap() {
     }
   });
 
-  // check the free lists
-  for (auto i = 0; i < kNumSmallSizes; i++) {
-    for (auto n = m_freelists[i].head; n; n = n->next) {
-      assert(free_blocks.find(n) != free_blocks.end());
-      free_blocks.erase(n);
-    }
-  }
-  assert(free_blocks.empty());
-
   // check the apc array list
   for (auto a : m_apc_arrays) {
     assert(apc_arrays.find(a) != apc_arrays.end());
@@ -762,41 +721,16 @@ void MemoryManager::checkHeap() {
   }
 }
 
-/*
- * Get a new slab, then allocate nbytes from it and install it in our
- * slab list.  Return the newly allocated nbytes-sized block.
- */
-NEVER_INLINE void* MemoryManager::newSlab(uint32_t nbytes) {
-  if (UNLIKELY(m_stats.usage > m_stats.maxBytes)) {
-    refreshStats();
-  }
-  storeTail(m_front, (char*)m_limit - (char*)m_front);
-  if (debug && RuntimeOption::EvalCheckHeapOnAlloc) checkHeap();
-  auto slab = m_heap.allocSlab(kSlabSize);
-  assert((uintptr_t(slab.ptr) & kSmallSizeAlignMask) == 0);
-  m_stats.borrow(slab.size);
-  m_stats.alloc += slab.size;
-  if (m_stats.alloc > m_stats.peakAlloc) {
-    m_stats.peakAlloc = m_stats.alloc;
-  }
-  m_front = (void*)(uintptr_t(slab.ptr) + nbytes);
-  m_limit = (void*)(uintptr_t(slab.ptr) + slab.size);
-  FTRACE(3, "newSlab: adding slab at {} to limit {}\n", slab.ptr, m_limit);
-  return slab.ptr;
-}
-
-inline void* MemoryManager::sequentialAllocate(void*& cursor, void* limit, 
+void* MemoryManager::sequentialAllocate(void*& cursor, void* limit, 
                                                uint32_t bytes) {
   assert((uintptr_t(cursor) & kSmallSizeAlignMask) == 0);
   assert((uintptr_t(limit) & kSmallSizeAlignMask) == 0);
-  assert(uintptr_t(cursor) < uintptr_t(limit));
+  assert(uintptr_t(cursor) <= uintptr_t(limit));
 
   auto space = uintptr_t(limit) - uintptr_t(cursor);
   if (bytes <= space) {
     // round to 16-byte alignment
-    auto aligned_bytes = (bytes + kSmallSizeAlignMask) & ~(kSmallSizeAlignMask);
-    // make sure I'm sane
-    assert((uintptr_t(aligned_bytes) & kSmallSizeAlignMask) == 0);
+    auto aligned_bytes = MemoryManager::align(bytes);
 
     void* p = cursor;
     cursor = (void*)(uintptr_t(cursor) + aligned_bytes);
@@ -809,17 +743,18 @@ inline void* MemoryManager::sequentialAllocate(void*& cursor, void* limit,
 }
 
 void* MemoryManager::getNextLineInBlock() {
-  // Starting at lineLimit, scan the line map for this block until we find a
+  // Starting at m_lineLimit, scan the line map for this block until we find a
   // a line that is not marked, and then continue one line further (conservative
-  // , implicit marking). If we don't find a non-marked line, set lineCursor to 
+  // , implicit marking). If we don't find a non-marked line, set m_lineCursor to 
   // nullptr and return nullptr
 
-  // If we do fine a non-marked line, set lineCursor at the start of this line
+  // If we do fine a non-marked line, set m_lineCursor at the start of this line
 
   // Continue until we find the next marked line or end of the block and set
-  // lineLimit there
+  // m_m_lineLimit there
 
   // just skip to the next block for now
+  m_lineCursor = nullptr;
   return nullptr;
 }
 
@@ -828,15 +763,15 @@ void* MemoryManager::getNextRecyclableBlock() {
   // for each until we find a line that is not marked and then continue one line
   // further (conservative, implicit marking). 
 
-  // Set set lineCursor at the start of this line and lineLimit at the start of
+  // Set set m_lineCursor at the start of this line and m_lineLimit at the start of
   // the next marked line or the end of the block
 
   // If there is not such a hole in any recyclable block, return nullptr
 
   while (true) {
-    block = m_heap.getNextRecyclableBlock();
+    auto block = m_heap.getNextRecyclableBlock();
     if (block.ptr == nullptr) {
-      lineCursor = nullptr;
+      m_lineCursor = nullptr;
       return nullptr;
     }
     for (uint32_t i = 0; i < block.size / kLineSize; i++) {
@@ -844,18 +779,18 @@ void* MemoryManager::getNextRecyclableBlock() {
       if ((uint8_t)block.lineMap[i] == 0 && i < (block.size / kLineSize) - 1) {
         // check implicit conservative mark on the next line
         if ((uint8_t)block.lineMap[i+1] == 0) {
-          lineCursor = (void*)(uintptr_t(block.ptr) + ((i+1) * kLineSize));
+          m_lineCursor = (void*)(uintptr_t(block.ptr) + ((i+1) * kLineSize));
           // find the end of our free lines
           for (uint32_t j = i+2; j < block.size / kLineSize; j++) {
             if ((uint8_t)block.lineMap[j] != 0) {
               // reached a marked line
-              lineLimit = (void*)(uintptr_t(block.ptr) + (j * kLineSize));
-              return lineCursor;
+              m_lineLimit = (void*)(uintptr_t(block.ptr) + (j * kLineSize));
+              return m_lineCursor;
             }
           }
           // reached the end of the block without finding a marked line
-          lineLimit = (void*)(uintptr_t(block.ptr) + block.size);
-          return lineCursor;
+          m_lineLimit = (void*)(uintptr_t(block.ptr) + block.size);
+          return m_lineCursor;
         }
       }
     }
@@ -868,8 +803,8 @@ void* MemoryManager::getFreeBlock() {
   auto block = m_heap.allocSlab(kBlockSize);
   assert((uintptr_t(block.ptr) & kSmallSizeAlignMask) == 0);
 
-  lineCursor = block.ptr;
-  lineLimit = (void*)(uintptr_t(block.ptr) + block.size);
+  m_lineCursor = block.ptr;
+  m_lineLimit = (void*)(uintptr_t(block.ptr) + block.size);
 
   return block.ptr;
 }
@@ -881,9 +816,9 @@ void* MemoryManager::getFreeBlock() {
  */
 void* MemoryManager::allocSlowHot(uint32_t bytes) {
   getNextLineInBlock();
-  if (lineCursor == nullptr) {
+  if (m_lineCursor == nullptr) {
     getNextRecyclableBlock();
-    if (lineCursor == nullptr) {
+    if (m_lineCursor == nullptr) {
       auto block = getFreeBlock();
       if (block == nullptr) {
         return nullptr; //OOM
@@ -897,20 +832,21 @@ void* MemoryManager::allocSlowHot(uint32_t bytes) {
  * pre: bytes is the size of a medium allocation
  */
 void* MemoryManager::overflowAlloc(uint32_t bytes) {
-  assert(bytes > kLineSize && bytes <= kMaxMediumSize);
+  // assert(bytes > kLineSize && bytes <= kMaxMediumSize);
 
-  void* p = sequentialAllocate(blockCursor, blockLimit, bytes);
-  if (p != nullptr) {
-    FTRACE(3, "overflowAlloc into block: {} -> {}\n", bytes, p);
-    return p;
-  }
-  // get a fresh block and allocate into it instead
-  auto block = getFreeBlock();
-  if (block == nullptr) {
-    return nullptr; //OOM
-  }
-  FTRACE(3, "overflowAlloc into *new* block: {} -> {}\n", bytes, p);
-  return sequentialAllocate(blockCursor, blockLimit, bytes);
+  // void* p = sequentialAllocate(blockCursor, blockLimit, bytes);
+  // if (p != nullptr) {
+  //   FTRACE(3, "overflowAlloc into block: {} -> {}\n", bytes, p);
+  //   return p;
+  // }
+  // // get a fresh block and allocate into it instead
+  // auto block = getFreeBlock();
+  // if (block == nullptr) {
+  //   return nullptr; //OOM
+  // }
+  // FTRACE(3, "overflowAlloc into *new* block: {} -> {}\n", bytes, p);
+  // return sequentialAllocate(blockCursor, blockLimit, bytes);
+  return nullptr;
 }
 
 inline void MemoryManager::updateBigStats() {
@@ -976,7 +912,7 @@ void* malloc(size_t nbytes) {
 
 void* calloc(size_t count, size_t nbytes) {
   auto const totalBytes = std::max<size_t>(count * nbytes, 1);
-  if (totalBytes <= kMaxSmallSize) {
+  if (totalBytes <= kMaxMediumSize) {
     return memset(req::malloc(totalBytes), 0, totalBytes);
   }
   return MM().callocBig(totalBytes);
@@ -1161,20 +1097,20 @@ void BigHeap::flush() {
   m_bigs = std::vector<BigNode*>{};
 }
 
-ImmixBlock BigHeap::allocSlab(size_t size) {
+MemBlock BigHeap::allocSlab(size_t size) {
   void* slab = safe_malloc(size);
   // probably not needed
-  uint8_t lineMap [kBlockSize / kLineSize] = {};
-  m_slabs.push_back({slab, size, lineMap});
-  return {slab, size, lineMap};
+  ImmixBlock b = ImmixBlock{slab, size};
+  m_slabs.push_back(b);
+  return {slab, size};
 }
 
 ImmixBlock BigHeap::getNextRecyclableBlock() {
   if (m_pos < m_slabs.size()) {
     return m_slabs[m_pos++];
   }
-  uint8_t lineMap [kBlockSize / kLineSize] = {};
-  return {nullptr, 0, lineMap};
+  auto emptyBlock = ImmixBlock{nullptr, 0};
+  return emptyBlock;
 }
 
 void BigHeap::enlist(BigNode* n, HeaderKind kind, size_t size) {
@@ -1214,7 +1150,7 @@ bool BigHeap::contains(void* ptr) const {
   return it != std::end(m_slabs);
 }
 
-void BigHeap::markLineContaining(void* p) {
+void BigHeap::markLineContaining(const void* p) {
   auto const ptrInt = reinterpret_cast<uintptr_t>(p);
   auto it = std::find_if(std::begin(m_slabs), std::end(m_slabs),
     [&] (ImmixBlock slab) {
@@ -1223,8 +1159,25 @@ void BigHeap::markLineContaining(void* p) {
     }
   );
   assert(it != std::end(m_slabs));
-  lineNum = (ptrInt - uintptr_t(it->ptr)) / 128;
+  auto lineNum = (ptrInt - uintptr_t(it->ptr)) / 128;
   it->lineMap[lineNum] = 1; //mark the line
+}
+
+// p should point to start of a line
+void BigHeap::markBlockContaining(const void* p) {
+  auto const ptrInt = reinterpret_cast<uintptr_t>(p);
+  auto it = std::find_if(std::begin(m_slabs), std::end(m_slabs),
+    [&] (ImmixBlock slab) {
+      auto const baseInt = reinterpret_cast<uintptr_t>(slab.ptr);
+      return ptrInt >= baseInt && ptrInt < baseInt + slab.size;
+    }
+  );
+  assert(it != std::end(m_slabs));
+  it->marked = 1;
+}
+
+void BigHeap::resetBlockPointer() {
+  m_pos = 0;
 }
 
 NEVER_INLINE
@@ -1321,7 +1274,7 @@ void ContiguousHeap::flush() {
   m_used = m_peak = m_base;
   m_freeList.size() = 0;
   m_freeList.next = nullptr;
-  m_slabs = std::vector<MemBlock>{};
+  m_slabs = std::vector<ImmixBlock>{};
   m_bigs = std::vector<BigNode*>{};
 }
 
@@ -1425,7 +1378,7 @@ void* ContiguousHeap::heapAlloc(size_t nbytes, size_t &cap) {
   auto cur = m_freeList.next;
   while (cur != nullptr ) {
     if (cur->size() >= alignedSize &&
-        cur->size() < alignedSize + kMaxSmallSize) {
+        cur->size() < alignedSize + kMaxMediumSize) {
       // found freed heap node that fits allocation and doesn't need to split
       ptr = cur;
       prev->next = cur->next;

@@ -85,7 +85,7 @@ void delete_{0:s}(ObjectData* obj, const Class* cls) {{
 
   auto const builtinSz = sizeof(c_{0:s}) - sizeof(ObjectData);
   auto const size = ObjectData::sizeForNProps(nProps) + builtinSz;
-  if (LIKELY(size <= kMaxSmallSize)) {{
+  if (LIKELY(size <= kMaxMediumSize)) {{
     return MM().freeSmallSize(ptr, size);
   }}
   return MM().freeBigSize(ptr, size);

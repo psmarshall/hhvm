@@ -12,7 +12,7 @@ extern char *gd_strtok_r(char *s, char *sep, char **state);
 
 /* Check for request OOM.  Call before allocating a lot of memory. */
 inline bool precheckOOM(size_t allocsz) {
-  return allocsz > HPHP::kMaxSmallSize && HPHP::MM().preAllocOOM(allocsz);
+  return allocsz > HPHP::kMaxMediumSize && HPHP::MM().preAllocOOM(allocsz);
 }
 
 /* These functions wrap memory management. gdFree is

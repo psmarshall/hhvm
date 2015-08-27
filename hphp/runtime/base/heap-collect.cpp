@@ -212,6 +212,7 @@ bool Marker::mark(const void* p) {
   h->hdr_.mark = true;
   // mark our line... somehow
   MM().markLineContaining(p);
+  MM().markBlockContaining(p); // super slow to do this here
   return first;
 }
 
@@ -633,6 +634,22 @@ void Marker::sweep() {
       mm.objFree(h, h->size());
     }
   }
+
+  // immix free lines
+  mm.forEachLine([&](void* line, uint8_t markByte) {
+    if (markByte == 0) {
+      TRACE(2, "line freed %p", line);
+      memset(line, kSmallFreeFill, kLineSize);
+    } else {
+      TRACE(2, "line kept %p", line);
+    }
+  });
+
+  // TODO blocks never get freed
+
+  // reset to start allocating into blocks from the start again
+  mm.goToFirstRecyclableBlock();
+
   TRACE(1, "sweep tot %lu(%lu) mk %lu(%lu) amb %lu(%lu) free %lu(%lu)\n",
         total_.count, total_.bytes,
         marked.count, marked.bytes,

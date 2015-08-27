@@ -785,7 +785,7 @@ Array unserializeArray(VariableUnserializer* uns) {
   auto const allocsz = computeAllocBytes(scale);
 
   // For large arrays, do a naive pre-check for OOM.
-  if (UNLIKELY(allocsz > kMaxSmallSize && MM().preAllocOOM(allocsz))) {
+  if (UNLIKELY(allocsz > kMaxMediumSize && MM().preAllocOOM(allocsz))) {
     check_request_surprise_unlikely();
   }
 

@@ -279,7 +279,7 @@ typename std::enable_if<
   req::ptr<T>
 >::type make(Args&&... args) {
   constexpr auto size = sizeof(ResourceHdr) + sizeof(T);
-  static_assert(size <= 0xffff && size < kMaxSmallSize, "");
+  static_assert(size <= 0xffff && size < kMaxMediumSize, "");
   static_assert(std::is_convertible<T*,ResourceData*>::value, "");
   auto const b = static_cast<ResourceHdr*>(MM().mallocSmallSize(size));
   b->init(size); // initialize HeaderWord

@@ -151,7 +151,7 @@ void nativeDataInstanceDtor(ObjectData* obj, const Class* cls) {
   }
 
   size_t size = ObjectData::sizeForNProps(nProps) + ndsize(obj, ndi);
-  if (LIKELY(size <= kMaxSmallSize)) {
+  if (LIKELY(size <= kMaxMediumSize)) {
     return MM().freeSmallSize(node, size);
   }
   MM().freeBigSize(node, size);

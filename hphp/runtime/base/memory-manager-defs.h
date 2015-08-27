@@ -209,6 +209,15 @@ template<class Fn> void BigHeap::iterate(Fn fn) {
   }
 }
 
+template<class Fn> void BigHeap::forEachLine(Fn fn) {
+  for (auto &slab : m_slabs) {
+    for (uint32_t i = 0; i < kLinesPerBlock; i += kLineSize) {
+      void* line = (void*)(uintptr_t(slab.ptr) + i);
+      fn(line, slab.lineMap[i]);
+    }
+  }
+}
+
 // Raw iterator loop over the headers of everything in the heap.  Skips BigObj
 // because it's just a detail of which sub-heap we used to allocate something
 // based on its size, and it can prefix almost any other header kind.  Clients
@@ -228,9 +237,14 @@ template<class Fn> void MemoryManager::iterate(Fn fn) {
   });
 }
 
-// same as iterate(), but calls initFree first.
+template<class Fn> void MemoryManager::forEachLine(Fn fn) {
+  m_heap.forEachLine([&](void* line, uint8_t markByte) {
+    fn(line, markByte);
+  });
+}
+
+// same as iterate()
 template<class Fn> void MemoryManager::forEachHeader(Fn fn) {
-  initFree();
   iterate(fn);
 }
 

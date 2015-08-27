@@ -230,6 +230,7 @@ constexpr unsigned kLgSizeClassesPerDoubling = 2;
 constexpr unsigned kLineSize = 128;
 constexpr unsigned kBlockSize = 32768;
 constexpr unsigned kMaxMediumSize = 8192; //8kB is max medium object (1/4 of block size)
+constexpr unsigned kLinesPerBlock = kBlockSize / kLineSize;
 
 constexpr unsigned kSmallPreallocCountLimit = 8;
 constexpr uint32_t kSmallPreallocBytesLimit = uint32_t{1} << 9;
@@ -305,7 +306,10 @@ struct MemBlock {
 struct ImmixBlock {
   void* ptr;
   size_t size; // should always be kBlockSize
-  uint8_t lineMap[kBlockSize / kLineSize]; // 256 lines per block for 32kB block
+  uint8_t lineMap[kLinesPerBlock]; // 256 lines per block for 32kB block
+  uint8_t marked;
+
+  ImmixBlock(void* ptr, size_t size) : ptr(ptr), size(size), marked(0) {}
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -322,7 +326,10 @@ struct BigHeap {
   // return true if ptr points into one of the slabs
   bool contains(void* ptr) const;
 
-  void markLineContaining(void* p);
+  void markLineContaining(const void* p);
+  void markBlockContaining(const void* p);
+
+  void resetBlockPointer();
 
   // allocate a MemBlock of at least size bytes, track in m_slabs.
   MemBlock allocSlab(size_t size);
@@ -345,6 +352,7 @@ struct BigHeap {
 
   // allow whole-heap iteration
   template<class Fn> void iterate(Fn);
+  template<class Fn> void forEachLine(Fn);
 
  protected:
   void enlist(BigNode*, HeaderKind kind, size_t size);
@@ -435,11 +443,15 @@ struct MemoryManager {
   /////////////////////////////////////////////////////////////////////////////
   // Allocation.
 
+  static uint32_t align(uint32_t bytes);
+
   /*
    * Return a lower bound estimate of the capacity that will be returned for
    * the requested size.
    */
   static uint32_t estimateCap(uint32_t requested);
+
+
 
   /*
    * Allocate/deallocate a small memory block in a given small size class.
@@ -703,11 +715,15 @@ struct MemoryManager {
   template<class Fn> void iterate(Fn);
   template<class Fn> void forEachHeader(Fn);
   template<class Fn> void forEachObject(Fn);
+  template<class Fn> void forEachLine(Fn);
 
   /*
    * Line marking
    */
-  void markLineContaining(void* p);
+  void markLineContaining(const void* p);
+  void markBlockContaining(const void* p);
+
+  void goToFirstRecyclableBlock();
 
   /*
    * Run the experimental collector.
@@ -757,7 +773,6 @@ private:
   MemoryManager& operator=(const MemoryManager&) = delete;
 
 private:
-  void* newSlab(uint32_t nbytes);
   void  updateBigStats();
   void* mallocBig(size_t nbytes);
   void* callocBig(size_t nbytes);
@@ -846,8 +861,8 @@ private:
 private:
   TRACE_SET_MOD(mm);
 
-  void* lineCursor;
-  void* lineLimit;
+  void* m_lineCursor;
+  void* m_lineLimit;
   StringDataNode m_strings; // in-place node is head of circular list
   std::vector<APCLocalArray*> m_apc_arrays;
   MemoryUsageStats m_stats;

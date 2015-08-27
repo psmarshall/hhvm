@@ -60,10 +60,6 @@ auto constexpr kMaxStringSimpleLen = CapCode::Threshold + 1 - kCapOverhead;
 static_assert(kMaxStringSimpleLen + kCapOverhead < kMaxSmallSizeLookup, "");
 static_assert(kMaxStringSimpleLen <= CapCode::Threshold, "");
 auto constexpr maxSimpleAlloc = kMaxStringSimpleLen + kCapOverhead;
-auto constexpr sizeClass =
-  kSmallSize2Index[(maxSimpleAlloc - 1) >> kLgSmallSizeQuantum];
-static_assert(kSmallIndex2Size[sizeClass] == maxSimpleAlloc,
-              "kMaxStringSimpleLen should be maximized");
 
 }
 
@@ -74,10 +70,9 @@ ALWAYS_INLINE StringData* allocFlatSmallImpl(size_t len) {
   static_assert(kMaxStringSimpleLen + kCapOverhead <= kMaxSmallSizeLookup, "");
 
   auto const requestSize = len + kCapOverhead;
-  auto const sizeClass = MemoryManager::lookupSmallSize2Index(requestSize);
-  auto const allocSize = kSmallIndex2Size[sizeClass];
+  auto const allocSize = MemoryManager::align(requestSize);
   auto sd = static_cast<StringData*>(
-    MM().mallocSmallIndex(sizeClass, allocSize)
+    MM().mallocSmallSize(allocSize)
   );
 
   auto const cap = allocSize - kCapOverhead;
@@ -99,14 +94,10 @@ ALWAYS_INLINE StringData* allocFlatSlowImpl(size_t len) {
   auto const need = CapCode::roundUp(len) + kCapOverhead;
   StringData* sd;
   CapCode cc;
-  size_t sizeClass = 0;
-  static_assert(kSmallIndex2Size[0] < kCapOverhead,
-                "Size class 0 indicates shared or big allocations");
-  if (LIKELY(need <= kMaxSmallSize)) {
-    sizeClass = MemoryManager::computeSmallSize2Index(need);
-    auto const sz = MemoryManager::smallIndex2Size(sizeClass);
+  if (LIKELY(need <= kMaxMediumSize)) {
+    auto const sz = MemoryManager::align(need);
     cc = CapCode::floor(sz - kCapOverhead);
-    sd = static_cast<StringData*>(MM().mallocSmallIndex(sizeClass, sz));
+    sd = static_cast<StringData*>(MM().mallocSmallSize(sz));
   } else {
     auto const block = MM().mallocBigSize<true>(need);
     size_t actualCap = block.size - kCapOverhead;
@@ -420,7 +411,7 @@ ALWAYS_INLINE void StringData::enlist() {
 NEVER_INLINE
 StringData* StringData::MakeAPCSlowPath(const APCString* shared) {
   auto const sd = static_cast<StringData*>(
-    MM().mallocSmallSize(sizeof(StringData) + sizeof(SharedPayload))
+    MM().mallocSmallSize(sizeof(StringData) + sizeof(SharedPayload)) //alignment?
   );
   auto const data = shared->getStringData();
   sd->m_data = const_cast<char*>(data->m_data);
@@ -489,16 +480,13 @@ void StringData::release() noexcept {
   // above Threshold.
   if (LIKELY(m_hdr.aux.code <= kMaxStringSimpleLen)) {
     auto const size = kCapOverhead + m_hdr.aux.code;
-    auto const sizeClass = MemoryManager::lookupSmallSize2Index(size);
-    MM().freeSmallIndex(this, sizeClass, size);
+    MM().freeSmallSize(this, size);
     return;
   }
 
   auto const size = capacity() + kCapOverhead;
-  if (size <= kMaxSmallSize) {
-    auto const sizeClass = MemoryManager::computeSmallSize2Index(size);
-    auto const sz = MemoryManager::smallIndex2Size(sizeClass);
-    MM().freeSmallIndex(this, sizeClass, sz);
+  if (size <= kMaxMediumSize) {
+    MM().freeSmallSize(this, size);
     return;
   }
   MM().freeBigSize(this, size);

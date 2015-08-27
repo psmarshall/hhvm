@@ -145,9 +145,16 @@ inline int operator<<(HeaderKind k, int bits) {
 
 //////////////////////////////////////////////////////////////////////
 
+inline uint32_t MemoryManager::align(uint32_t bytes) {
+  // round to 16-byte alignment
+  auto aligned_bytes = (bytes + kSmallSizeAlignMask) & ~(kSmallSizeAlignMask);
+  // make sure I'm sane
+  assert((uintptr_t(aligned_bytes) & kSmallSizeAlignMask) == 0);
+  return aligned_bytes;
+}
+
 inline uint32_t MemoryManager::estimateCap(uint32_t requested) {
-  return requested <= kMaxSmallSize ? smallSizeClass(requested)
-                                    : requested;
+  return MemoryManager::align(requested);
 }
 
 inline uint32_t MemoryManager::bsr(uint32_t x) {
@@ -169,7 +176,7 @@ inline void* MemoryManager::mallocSmallSize(uint32_t bytes) {
   assert(bytes > 0);
   assert(bytes <= kMaxMediumSize);
 
-  void* p = sequentialAllocate(lineCursor, lineLimit, bytes);
+  void* p = sequentialAllocate(m_lineCursor, m_lineLimit, bytes);
   if (p != nullptr) {
     FTRACE(3, "mallocSmallSize: {} -> {}\n", bytes, p);
     return p;
@@ -183,7 +190,7 @@ inline void* MemoryManager::mallocSmallSize(uint32_t bytes) {
 
 inline void MemoryManager::freeSmallSize(void* ptr, uint32_t bytes) {
   assert(bytes > 0);
-  assert(bytes <= kMaxSmallSize);
+  assert(bytes <= kMaxMediumSize);
   assert((reinterpret_cast<uintptr_t>(ptr) & kSmallSizeAlignMask) == 0);
 
   if (UNLIKELY(m_bypassSlabAlloc)) {
@@ -192,10 +199,7 @@ inline void MemoryManager::freeSmallSize(void* ptr, uint32_t bytes) {
 
   if (debug) eagerGCCheck();
 
-  auto const i = smallSize2Index(bytes);
-  FTRACE(3, "freeSmallSize({}, {}), freelist {}\n", ptr, bytes, i);
-
-  m_freelists[i].push(ptr, bytes);
+  memset(ptr, kSmallFreeFill, bytes);
   assert(m_needInitFree = true); // intentional debug-only side-effect.
   m_stats.usage -= bytes;
 
@@ -308,8 +312,18 @@ inline bool MemoryManager::contains(void *p) const {
   return m_heap.contains(p);
 }
 
-inline void MemoryManager::markLineContaining(void *p) {
+inline void MemoryManager::markLineContaining(const void *p) {
   return m_heap.markLineContaining(p);
+}
+
+inline void MemoryManager::markBlockContaining(const void *p) {
+  return m_heap.markBlockContaining(p);
+}
+
+inline void MemoryManager::goToFirstRecyclableBlock() {
+  m_heap.resetBlockPointer();
+  // advance to next free line in first block or subsequent blocks
+  getNextRecyclableBlock(); 
 }
 
 inline bool MemoryManager::checkContains(void* p) const {
