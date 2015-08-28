@@ -234,16 +234,17 @@ void MemoryManager::deleteRootMaps() {
 }
 
 void MemoryManager::resetRuntimeOptions() {
+  TRACE(2, "resetRuntimeOptions called\n");
   if (debug) {
     deleteRootMaps();
     checkHeap();
     // check that every allocation in heap has been freed before reset
-    iterate([&](Header* h) {
-      assert(h->kind() == HeaderKind::Free || h->hdr_.mrb);
-      if (h->hdr_.mrb) {
-        TRACE(1, "leaked due to mrb: hdr %p\n", h);
-      }
-    });
+    // iterate([&](Header* h) {
+    //   assert(h->kind() == HeaderKind::Free || h->hdr_.mrb);
+    //   if (h->hdr_.mrb) {
+    //     TRACE(1, "leaked due to mrb: hdr %p\n", h);
+    //   }
+    // });
   }
   MemoryManager::TlsWrapper::destroy(); // ~MemoryManager()
   MemoryManager::TlsWrapper::getCheck(); // new MemeoryManager()
@@ -466,6 +467,7 @@ template void MemoryManager::refreshStatsImpl<false>(MemoryUsageStats& stats);
 void MemoryManager::sweep() {
   assert(!sweeping());
   if (debug) checkHeap();
+  TRACE(2, "MemoryManager::sweep() calling collect()");
   collect();
   m_sweeping = true;
   SCOPE_EXIT { m_sweeping = false; };
@@ -522,7 +524,6 @@ void MemoryManager::resetAllocator() {
   m_heap.reset();
 
   m_lineCursor = m_lineLimit = nullptr;
-  m_needInitFree = false;
 
   resetStatsImpl(true);
   FTRACE(1, "reset: strings {}\n", nstrings);
@@ -642,58 +643,25 @@ const char* header_names[] = {
 };
 static_assert(sizeof(header_names)/sizeof(*header_names) == NumHeaderKinds, "");
 
+// initialize a Hole header in the unused memory between m_front and m_limit
+void MemoryManager::initHole(void* ptr, uint32_t size) {
+  memset(ptr, kSmallFreeFill, size);
+  auto hdr = static_cast<FreeNode*>(ptr);
+  hdr->hdr.kind = HeaderKind::Hole;
+  hdr->size() = size;
+}
+
 // test iterating objects in slabs
 void MemoryManager::checkHeap() {
-  size_t bytes=0;
-  std::vector<Header*> hdrs;
+  size_t markedLines = 0, totalLines = 0;
   std::unordered_set<FreeNode*> free_blocks;
   std::unordered_set<APCLocalArray*> apc_arrays;
   std::unordered_set<StringData*> apc_strings;
-  size_t counts[NumHeaderKinds];
-  for (unsigned i=0; i < NumHeaderKinds; i++) counts[i] = 0;
-  forEachHeader([&](Header* h) {
-    hdrs.push_back(&*h);
-    TRACE(2, "checkHeap: hdr %p\n", hdrs[hdrs.size()-1]);
-    bytes += h->size();
-    counts[(int)h->kind()]++;
-    switch (h->kind()) {
-      case HeaderKind::Free:
-        free_blocks.insert(&h->free_);
-        break;
-      case HeaderKind::Apc:
-        apc_arrays.insert(&h->apc_);
-        break;
-      case HeaderKind::String:
-        if (h->str_.isShared()) apc_strings.insert(&h->str_);
-        break;
-      case HeaderKind::Packed:
-      case HeaderKind::Struct:
-      case HeaderKind::Mixed:
-      case HeaderKind::Empty:
-      case HeaderKind::Globals:
-      case HeaderKind::Proxy:
-      case HeaderKind::Object:
-      case HeaderKind::ResumableObj:
-      case HeaderKind::AwaitAllWH:
-      case HeaderKind::Vector:
-      case HeaderKind::Map:
-      case HeaderKind::Set:
-      case HeaderKind::Pair:
-      case HeaderKind::ImmVector:
-      case HeaderKind::ImmMap:
-      case HeaderKind::ImmSet:
-      case HeaderKind::Resource:
-      case HeaderKind::Ref:
-      case HeaderKind::ResumableFrame:
-      case HeaderKind::NativeData:
-      case HeaderKind::SmallMalloc:
-      case HeaderKind::BigMalloc:
-        break;
-      case HeaderKind::BigObj:
-      case HeaderKind::Hole:
-        assert(false && "forEachHeader skips these kinds");
-        break;
-    }
+
+  forEachLine([&](void* p, uint8_t markByte) {
+    ++totalLines;
+    if (markByte > 0 ) ++markedLines;
+    TRACE(2, "checkHeap: line %p\n markByte(%d)\n", p, markByte);
   });
 
   // check the apc array list
@@ -713,12 +681,7 @@ void MemoryManager::checkHeap() {
   }
   assert(apc_strings.empty());
 
-  TRACE(1, "checkHeap: %lu objects %lu bytes\n", hdrs.size(), bytes);
-  TRACE(1, "checkHeap-types: ");
-  for (unsigned i = 0; i < NumHeaderKinds; ++i) {
-    TRACE(1, "%s %lu%s", header_names[i], counts[i],
-          (i + 1 < NumHeaderKinds ? " " : "\n"));
-  }
+  TRACE(1, "checkHeap: %lu totalLines %lu markedLines\n", totalLines, markedLines);
 }
 
 void* MemoryManager::sequentialAllocate(void*& cursor, void* limit, 
@@ -737,8 +700,10 @@ void* MemoryManager::sequentialAllocate(void*& cursor, void* limit,
 
     assert(uintptr_t(p) + aligned_bytes == uintptr_t(cursor));
     // the other assertions imply p is aligned here
+    TRACE(3, "sequentialAllocate fit %d bytes in %lu space\n", aligned_bytes, space);
     return p;
   }
+  TRACE(3, "sequentialAllocate could not fit %d bytes in %lu space\n", bytes, space);
   return nullptr;
 }
 
@@ -754,6 +719,7 @@ void* MemoryManager::getNextLineInBlock() {
   // m_m_lineLimit there
 
   // just skip to the next block for now
+  TRACE(3, "getNextLineInBlock (skipped)\n");
   m_lineCursor = nullptr;
   return nullptr;
 }
@@ -771,6 +737,7 @@ void* MemoryManager::getNextRecyclableBlock() {
   while (true) {
     auto block = m_heap.getNextRecyclableBlock();
     if (block.ptr == nullptr) {
+      TRACE(3, "getNextRecyclableBlock returned null\n");
       m_lineCursor = nullptr;
       return nullptr;
     }
@@ -785,11 +752,13 @@ void* MemoryManager::getNextRecyclableBlock() {
             if ((uint8_t)block.lineMap[j] != 0) {
               // reached a marked line
               m_lineLimit = (void*)(uintptr_t(block.ptr) + (j * kLineSize));
+              TRACE(3, "getNextRecyclableBlock cursor %p limit %p\n", m_lineCursor, m_lineLimit);
               return m_lineCursor;
             }
           }
           // reached the end of the block without finding a marked line
           m_lineLimit = (void*)(uintptr_t(block.ptr) + block.size);
+          TRACE(3, "getNextRecyclableBlock cursor %p limit(end) %p\n", m_lineCursor, m_lineLimit);
           return m_lineCursor;
         }
       }
@@ -806,6 +775,8 @@ void* MemoryManager::getFreeBlock() {
   m_lineCursor = block.ptr;
   m_lineLimit = (void*)(uintptr_t(block.ptr) + block.size);
 
+  TRACE(3, "getFreeBlock %p size %lu\n", block.ptr, block.size);
+
   return block.ptr;
 }
 
@@ -815,6 +786,7 @@ void* MemoryManager::getFreeBlock() {
  * recyclable block, then get a fresh block.
  */
 void* MemoryManager::allocSlowHot(uint32_t bytes) {
+  TRACE(3, "allocSlowHot bytes(%d)\n", bytes);
   getNextLineInBlock();
   if (m_lineCursor == nullptr) {
     getNextRecyclableBlock();
@@ -1102,11 +1074,12 @@ MemBlock BigHeap::allocSlab(size_t size) {
   // probably not needed
   ImmixBlock b = ImmixBlock{slab, size};
   m_slabs.push_back(b);
+  m_pos = m_slabs.size() - 1; //overflowAlloc will struggle with this
   return {slab, size};
 }
 
 ImmixBlock BigHeap::getNextRecyclableBlock() {
-  if (m_pos < m_slabs.size()) {
+  if (!m_slabs.empty() && m_pos < m_slabs.size() - 1) {
     return m_slabs[m_pos++];
   }
   auto emptyBlock = ImmixBlock{nullptr, 0};

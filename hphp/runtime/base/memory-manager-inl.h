@@ -199,8 +199,7 @@ inline void MemoryManager::freeSmallSize(void* ptr, uint32_t bytes) {
 
   if (debug) eagerGCCheck();
 
-  memset(ptr, kSmallFreeFill, bytes);
-  assert(m_needInitFree = true); // intentional debug-only side-effect.
+  initHole(ptr, bytes);
   m_stats.usage -= bytes;
 
   FTRACE(3, "freeSmallSize: {} ({} bytes)\n", ptr, bytes);

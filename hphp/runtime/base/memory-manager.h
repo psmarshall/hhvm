@@ -306,7 +306,7 @@ struct MemBlock {
 struct ImmixBlock {
   void* ptr;
   size_t size; // should always be kBlockSize
-  uint8_t lineMap[kLinesPerBlock]; // 256 lines per block for 32kB block
+  uint8_t lineMap[kLinesPerBlock] = {}; // 256 lines per block for 32kB block
   uint8_t marked;
 
   ImmixBlock(void* ptr, size_t size) : ptr(ptr), size(size), marked(0) {}
@@ -882,7 +882,6 @@ private:
   bool m_statsIntervalActive;
   bool m_couldOOM{true};
   bool m_bypassSlabAlloc;
-  bool m_needInitFree{false}; // true after free(), false after initFree()
 
   ReqProfContext m_profctx;
   static std::atomic<ReqProfContext*> s_trigger;

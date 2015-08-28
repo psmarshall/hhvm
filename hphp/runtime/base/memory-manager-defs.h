@@ -186,8 +186,10 @@ template<class Fn> void BigHeap::iterate(Fn fn) {
       // so don't round them.
       auto size = hdr->hdr_.kind == HeaderKind::Hole ||
                   hdr->hdr_.kind == HeaderKind::Free ? hdr->free_.size() :
-                  hdr->size(); 
-      assert(size % 16 == 0); // TODO round to 16 byte align?
+                  hdr->size();
+      // does this make sense ?
+      // size can sometimes not be aligned
+      size = MemoryManager::align(size);
       hdr = (Header*)((char*)hdr + size);
       if (hdr >= slab_end) {
         assert(hdr == slab_end && "hdr > slab_end indicates corruption");
@@ -211,8 +213,8 @@ template<class Fn> void BigHeap::iterate(Fn fn) {
 
 template<class Fn> void BigHeap::forEachLine(Fn fn) {
   for (auto &slab : m_slabs) {
-    for (uint32_t i = 0; i < kLinesPerBlock; i += kLineSize) {
-      void* line = (void*)(uintptr_t(slab.ptr) + i);
+    for (uint32_t i = 0; i < kLinesPerBlock; i++) {
+      void* line = (void*)(uintptr_t(slab.ptr) + (i * kLineSize));
       fn(line, slab.lineMap[i]);
     }
   }
@@ -223,7 +225,6 @@ template<class Fn> void BigHeap::forEachLine(Fn fn) {
 // based on its size, and it can prefix almost any other header kind.  Clients
 // can call this directly to avoid unnecessary initFree()s.
 template<class Fn> void MemoryManager::iterate(Fn fn) {
-  assert(!m_needInitFree);
   m_heap.iterate([&](Header* h) {
     if (h->kind() == HeaderKind::BigObj) {
       // skip BigNode
@@ -233,7 +234,6 @@ template<class Fn> void MemoryManager::iterate(Fn fn) {
       return; // continue iterating
     }
     fn(h);
-    assert(!m_needInitFree); // otherwise the heap is unparsable.
   });
 }
 

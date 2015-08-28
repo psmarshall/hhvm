@@ -659,7 +659,17 @@ void Marker::sweep() {
 }
 
 void MemoryManager::collect() {
+  TRACE_SET_MOD(mm);
+  TRACE(1, "MemoryManager::collect() called\n");
   if (!RuntimeOption::EvalEnableGC || empty()) return;
+  // initialise a freenode at the end of the current block
+  uint32_t space = uintptr_t(m_lineLimit) - uintptr_t(m_lineCursor);
+  if (space >= sizeof(FreeNode)) {
+    initHole(m_lineCursor, space);
+  } else {
+    assert(false && "uh oh, no space for free node");
+  }
+  
   Marker mkr;
   mkr.init();
   mkr.trace();
