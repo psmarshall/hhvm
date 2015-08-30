@@ -326,7 +326,8 @@ struct BigHeap {
   // return true if ptr points into one of the slabs
   bool contains(void* ptr) const;
 
-  void markLineContaining(const void* p);
+  void markLineForSmall(const void* p);
+  void markLinesForMedium(const void* p, uint32_t size);
   void markBlockContaining(const void* p);
 
   void resetBlockPointer();
@@ -720,7 +721,8 @@ struct MemoryManager {
   /*
    * Line marking
    */
-  void markLineContaining(const void* p);
+  void markLineForSmall(const void* p);
+  void markLinesForMedium(const void* p, uint32_t size);
   void markBlockContaining(const void* p);
 
   void goToFirstRecyclableBlock();

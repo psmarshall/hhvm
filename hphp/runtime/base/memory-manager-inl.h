@@ -311,8 +311,12 @@ inline bool MemoryManager::contains(void *p) const {
   return m_heap.contains(p);
 }
 
-inline void MemoryManager::markLineContaining(const void *p) {
-  return m_heap.markLineContaining(p);
+inline void MemoryManager::markLineForSmall(const void *p) {
+  return m_heap.markLineForSmall(p);
+}
+
+inline void MemoryManager::markLinesForMedium(const void *p, uint32_t size) {
+  return m_heap.markLinesForMedium(p, size);
 }
 
 inline void MemoryManager::markBlockContaining(const void *p) {

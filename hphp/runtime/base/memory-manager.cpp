@@ -467,7 +467,7 @@ template void MemoryManager::refreshStatsImpl<false>(MemoryUsageStats& stats);
 void MemoryManager::sweep() {
   assert(!sweeping());
   if (debug) checkHeap();
-  TRACE(2, "MemoryManager::sweep() calling collect()");
+  TRACE(2, "MemoryManager::sweep() calling collect()\n");
   collect();
   m_sweeping = true;
   SCOPE_EXIT { m_sweeping = false; };
@@ -702,7 +702,11 @@ void* MemoryManager::sequentialAllocate(void*& cursor, void* limit,
     // the other assertions imply p is aligned here
     TRACE(3, "sequentialAllocate fit %d bytes in %lu space\n", aligned_bytes, space);
     return p;
+  } else if (space != 0) {
+    assert(space >= 16); // otherwise we can't fit a freenode header
+    initHole(cursor, space);
   }
+  
   TRACE(3, "sequentialAllocate could not fit %d bytes in %lu space\n", bytes, space);
   return nullptr;
 }
@@ -1123,7 +1127,7 @@ bool BigHeap::contains(void* ptr) const {
   return it != std::end(m_slabs);
 }
 
-void BigHeap::markLineContaining(const void* p) {
+void BigHeap::markLineForSmall(const void* p) {
   auto const ptrInt = reinterpret_cast<uintptr_t>(p);
   auto it = std::find_if(std::begin(m_slabs), std::end(m_slabs),
     [&] (ImmixBlock slab) {
@@ -1132,8 +1136,27 @@ void BigHeap::markLineContaining(const void* p) {
     }
   );
   assert(it != std::end(m_slabs));
-  auto lineNum = (ptrInt - uintptr_t(it->ptr)) / 128;
+  auto lineNum = (ptrInt - uintptr_t(it->ptr)) / kLineSize;
   it->lineMap[lineNum] = 1; //mark the line
+}
+
+void BigHeap::markLinesForMedium(const void* p, uint32_t size) {
+  assert(size > kLineSize);
+  auto const ptrInt = reinterpret_cast<uintptr_t>(p);
+  auto it = std::find_if(std::begin(m_slabs), std::end(m_slabs),
+    [&] (ImmixBlock slab) {
+      auto const baseInt = reinterpret_cast<uintptr_t>(slab.ptr);
+      return ptrInt >= baseInt && ptrInt < baseInt + slab.size;
+    }
+  );
+  assert(it != std::end(m_slabs));
+  auto lineNum = (ptrInt - uintptr_t(it->ptr)) / kLineSize;
+  auto firstLine = lineNum;
+  auto numLines = (size / kLineSize) + 1;
+  for(; lineNum < firstLine + numLines; lineNum++) {
+    it->lineMap[lineNum] = 1; //mark the line
+  }
+  TRACE(3, "Marked %u lines for medium size=%d\n", numLines, size);
 }
 
 // p should point to start of a line

@@ -211,7 +211,7 @@ bool Marker::mark(const void* p) {
   auto first = !h->hdr_.mark;
   h->hdr_.mark = true;
   // mark our line... somehow
-  MM().markLineContaining(p);
+  MM().markLineForSmall(p);
   MM().markBlockContaining(p); // super slow to do this here
   return first;
 }
@@ -422,16 +422,12 @@ void Marker::init() {
       case HK::Apc:
       case HK::Globals:
       case HK::Proxy:
-<<<<<<< HEAD
       case HK::Packed:
       case HK::Mixed:
       case HK::Struct:
       case HK::Empty:
       case HK::String:
-        assert(h->hdr_.count > 0);
         ptrs_.insert(h);
-=======
->>>>>>> Fix inconsistent assumptions of tracing code vs. mrb code
         total_ += h->size();
         break;
       case HK::Ref:
@@ -500,6 +496,11 @@ void Marker::init() {
     }
   });
   ptrs_.prepare();
+
+  //clear marks for immix lines
+  MM().forEachLine([&](void* line, uint8_t& markByte) {
+    markByte = 0;
+  });
 }
 
 void Marker::trace() {
@@ -509,6 +510,21 @@ void Marker::trace() {
     work_.pop_back();
     scanHeader(h, *this);
   }
+  // mark all immix lines containing SmallMalloc headers
+  // because we don't actually free them yet
+  MM().forEachHeader([&](Header* h) {
+    if (h->kind() == HK::SmallMalloc) {
+      // mark line
+      TRACE_SET_MOD(mm);
+      TRACE(2, "Marking line for SmallMalloc at %p\n", h);
+      if (h->size() > kLineSize) {
+        TRACE(2, "Marking multiple lines for SmallMalloc at %p\n", h);
+        MM().markLinesForMedium(h, h->size());
+      } else {
+        MM().markLineForSmall(h);
+      }
+    }
+  });
 }
 
 // check that headers have a "sensible" state during sweeping.
@@ -636,10 +652,10 @@ void Marker::sweep() {
   }
 
   // immix free lines
-  mm.forEachLine([&](void* line, uint8_t markByte) {
+  mm.forEachLine([&](void* line, uint8_t& markByte) {
     if (markByte == 0) {
       TRACE(2, "line freed %p", line);
-      memset(line, kSmallFreeFill, kLineSize);
+      // memset(line, kSmallFreeFill, kLineSize);
     } else {
       TRACE(2, "line kept %p", line);
     }

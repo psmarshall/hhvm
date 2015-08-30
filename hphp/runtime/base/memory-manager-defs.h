@@ -238,7 +238,7 @@ template<class Fn> void MemoryManager::iterate(Fn fn) {
 }
 
 template<class Fn> void MemoryManager::forEachLine(Fn fn) {
-  m_heap.forEachLine([&](void* line, uint8_t markByte) {
+  m_heap.forEachLine([&](void* line, uint8_t& markByte) {
     fn(line, markByte);
   });
 }
