@@ -711,33 +711,63 @@ void* MemoryManager::sequentialAllocate(void*& cursor, void* limit,
   return nullptr;
 }
 
+/*
+ * Find the next run of free lines in the current block and return and set the
+ * cursor, or if no such run exists, return and set cursor to nullptr.
+ */
 void* MemoryManager::getNextLineInBlock() {
-  // Starting at m_lineLimit, scan the line map for this block until we find a
-  // a line that is not marked, and then continue one line further (conservative
-  // , implicit marking). If we don't find a non-marked line, set m_lineCursor to 
-  // nullptr and return nullptr
+  ImmixBlock b = m_heap.currentBlock();
+  if (b.ptr == nullptr) {
+    m_lineCursor = nullptr;
+    return nullptr;
+  }
+  // We don't ever backtrack into the current block, so we start at our current 
+  // limit
+  uint32_t start = (uintptr_t(m_lineLimit) - uintptr_t(b.ptr)) / kLineSize;
+  return getFreeLines(b, start, m_lineCursor, m_lineLimit);
+}
 
-  // If we do fine a non-marked line, set m_lineCursor at the start of this line
+void* MemoryManager::getFreeLines(const ImmixBlock& block, uint32_t start,
+                                      void*& cursor, void*& limit) {
+  uint32_t linesInBlock = block.size / kLineSize;
+  assert(start <= linesInBlock);
 
-  // Continue until we find the next marked line or end of the block and set
-  // m_m_lineLimit there
+  // loop until 1 before the last line as the last line is implicitly marked
+  // if the line before it is marked.
+  for (uint32_t line = start; line < linesInBlock - 1; line++) {
+    if (block.lineMap[line] == 0) {
+      if (line == start || block.lineMap[line - 1] == 0) {
+        cursor = (void*)(uintptr_t(block.ptr) + line * kLineSize);
 
-  // just skip to the next block for now
-  TRACE(3, "getNextLineInBlock (skipped)\n");
-  m_lineCursor = nullptr;
+        // continue and find the end of this run of free lines
+        for (uint32_t endLine = line + 1; endLine < linesInBlock; endLine++) {
+          if (block.lineMap[endLine] != 0) {
+            limit = (void*)(uintptr_t(block.ptr) + endLine * kLineSize);
+
+            TRACE(3, "getFreeLines cursor %p limit %p\n",
+              cursor, limit);
+            return cursor;
+          }
+        }
+        // reached the end of the block without finding a marked line
+        limit = (void*)(uintptr_t(block.ptr) + block.size);
+
+        TRACE(3, "getFreeLines cursor %p limit(end) %p\n",
+          cursor, limit);
+        return cursor;
+      }
+    }
+  }
+  cursor = nullptr;
   return nullptr;
 }
 
+/* 
+ * Request the next block from the heap and move cursor to the next run of
+ * free lines within the block, if any exist. Return nullptr and set cursor to 
+ * nullptr if we have exhausted all recyclable blocks.
+ */
 void* MemoryManager::getNextRecyclableBlock() {
-  // Go through our recyclable blocks in address order, scanning the line map
-  // for each until we find a line that is not marked and then continue one line
-  // further (conservative, implicit marking). 
-
-  // Set set m_lineCursor at the start of this line and m_lineLimit at the start of
-  // the next marked line or the end of the block
-
-  // If there is not such a hole in any recyclable block, return nullptr
-
   while (true) {
     auto block = m_heap.getNextRecyclableBlock();
     if (block.ptr == nullptr) {
@@ -745,29 +775,8 @@ void* MemoryManager::getNextRecyclableBlock() {
       m_lineCursor = nullptr;
       return nullptr;
     }
-    for (uint32_t i = 0; i < block.size / kLineSize; i++) {
-      // FIXME so I don't skip first line of block due to implicit marking
-      if ((uint8_t)block.lineMap[i] == 0 && i < (block.size / kLineSize) - 1) {
-        // check implicit conservative mark on the next line
-        if ((uint8_t)block.lineMap[i+1] == 0) {
-          m_lineCursor = (void*)(uintptr_t(block.ptr) + ((i+1) * kLineSize));
-          // find the end of our free lines
-          for (uint32_t j = i+2; j < block.size / kLineSize; j++) {
-            if ((uint8_t)block.lineMap[j] != 0) {
-              // reached a marked line
-              m_lineLimit = (void*)(uintptr_t(block.ptr) + (j * kLineSize));
-              TRACE(3, "getNextRecyclableBlock cursor %p limit %p\n", m_lineCursor, m_lineLimit);
-              return m_lineCursor;
-            }
-          }
-          // reached the end of the block without finding a marked line
-          m_lineLimit = (void*)(uintptr_t(block.ptr) + block.size);
-          TRACE(3, "getNextRecyclableBlock cursor %p limit(end) %p\n", m_lineCursor, m_lineLimit);
-          return m_lineCursor;
-        }
-      }
-    }
-
+    void* ret = getFreeLines(block, /*start=*/0, m_lineCursor, m_lineLimit);
+    if (ret) return ret;
   }
 }
 
@@ -1084,10 +1093,10 @@ MemBlock BigHeap::allocSlab(size_t size) {
 
 ImmixBlock BigHeap::getNextRecyclableBlock() {
   if (!m_slabs.empty() && m_pos < m_slabs.size() - 1) {
-    return m_slabs[m_pos++];
+    ++m_pos;
+    return m_slabs[m_pos];
   }
-  auto emptyBlock = ImmixBlock{nullptr, 0};
-  return emptyBlock;
+  return ImmixBlock{nullptr, 0};
 }
 
 void BigHeap::enlist(BigNode* n, HeaderKind kind, size_t size) {
@@ -1172,8 +1181,13 @@ void BigHeap::markBlockContaining(const void* p) {
   it->marked = 1;
 }
 
+ImmixBlock BigHeap::currentBlock() {
+  if (m_pos != -1) return m_slabs[m_pos];
+  return ImmixBlock{nullptr, 0};
+}
+
 void BigHeap::resetBlockPointer() {
-  m_pos = 0;
+  m_pos = -1;
 }
 
 NEVER_INLINE

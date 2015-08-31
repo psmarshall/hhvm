@@ -326,7 +326,7 @@ inline void MemoryManager::markBlockContaining(const void *p) {
 inline void MemoryManager::goToFirstRecyclableBlock() {
   m_heap.resetBlockPointer();
   // advance to next free line in first block or subsequent blocks
-  getNextRecyclableBlock(); 
+  getNextRecyclableBlock();
 }
 
 inline bool MemoryManager::checkContains(void* p) const {

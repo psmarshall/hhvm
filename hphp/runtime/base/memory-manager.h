@@ -229,7 +229,7 @@ constexpr unsigned kLgSizeClassesPerDoubling = 2;
 
 constexpr unsigned kLineSize = 128;
 constexpr unsigned kBlockSize = 32768;
-constexpr unsigned kMaxMediumSize = 8192; //8kB is max medium object (1/4 of block size)
+constexpr unsigned kMaxMediumSize = 8192; //8kB is max medium object (1/4 block)
 constexpr unsigned kLinesPerBlock = kBlockSize / kLineSize;
 
 constexpr unsigned kSmallPreallocCountLimit = 8;
@@ -318,7 +318,7 @@ struct ImmixBlock {
  * Allocator for slabs and big blocks.
  */
 struct BigHeap {
-  BigHeap() {m_pos = 0;}
+  BigHeap() {m_pos = -1;}
   bool empty() const {
     return m_slabs.empty() && m_bigs.empty();
   }
@@ -337,6 +337,8 @@ struct BigHeap {
 
   // the next recyclable block
   ImmixBlock getNextRecyclableBlock();
+
+  ImmixBlock currentBlock();
 
   // allocation api for big blocks. These get a BigNode header and
   // are tracked in m_bigs
@@ -360,7 +362,7 @@ struct BigHeap {
 
  protected:
   std::vector<ImmixBlock> m_slabs;
-  uint32_t m_pos;
+  int32_t m_pos;
   std::vector<BigNode*> m_bigs;
 };
 
@@ -785,6 +787,8 @@ private:
   /* immix */
   void* sequentialAllocate(void*& cursor, void* limit, uint32_t bytes);
   void* getNextLineInBlock();
+  void* getFreeLines(const ImmixBlock& block, uint32_t start,
+                     void*& cursor, void*& limit);
   void* getNextRecyclableBlock();
   void* getFreeBlock();
   void* allocSlowHot(uint32_t bytes);
