@@ -329,6 +329,10 @@ inline void MemoryManager::goToFirstRecyclableBlock() {
   getNextRecyclableBlock();
 }
 
+inline void MemoryManager::freeUnusedBlocks() {
+  m_heap.freeUnusedBlocks();
+}
+
 inline bool MemoryManager::checkContains(void* p) const {
   // Be conservative if the small-block allocator is disabled.
   assert(RuntimeOption::DisableSmallAllocator || contains(p));

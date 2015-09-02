@@ -653,6 +653,15 @@ void MemoryManager::initHole(void* ptr, uint32_t size) {
 
 // test iterating objects in slabs
 void MemoryManager::checkHeap() {
+
+  // initialise a freenode at the end of the current block
+  // TODO could be redundant
+  if (m_lineCursor) {
+    uint32_t space = uintptr_t(m_lineLimit) - uintptr_t(m_lineCursor);
+    assert(space == 0 || space >= sizeof(FreeNode));
+    initHole(m_lineCursor, space);
+  }
+
   size_t markedLines = 0, totalLines = 0;
   std::unordered_set<FreeNode*> free_blocks;
   std::unordered_set<APCLocalArray*> apc_arrays;
@@ -661,7 +670,46 @@ void MemoryManager::checkHeap() {
   forEachLine([&](void* p, uint8_t markByte) {
     ++totalLines;
     if (markByte > 0 ) ++markedLines;
-    TRACE(2, "checkHeap: line %p\n markByte(%d)\n", p, markByte);
+    TRACE(3, "checkHeap: line %p\n markByte(%d)\n", p, markByte);
+  });
+
+  forEachHeader([&](Header* h) {
+    switch (h->kind()) {
+      case HeaderKind::Apc:
+        apc_arrays.insert(&h->apc_);
+        break;
+      case HeaderKind::String:
+        if (h->str_.isShared()) apc_strings.insert(&h->str_);
+        break;
+      case HeaderKind::Free:
+      case HeaderKind::Packed:
+      case HeaderKind::Struct:
+      case HeaderKind::Mixed:
+      case HeaderKind::Empty:
+      case HeaderKind::Globals:
+      case HeaderKind::Proxy:
+      case HeaderKind::Object:
+      case HeaderKind::ResumableObj:
+      case HeaderKind::AwaitAllWH:
+      case HeaderKind::Vector:
+      case HeaderKind::Map:
+      case HeaderKind::Set:
+      case HeaderKind::Pair:
+      case HeaderKind::ImmVector:
+      case HeaderKind::ImmMap:
+      case HeaderKind::ImmSet:
+      case HeaderKind::Resource:
+      case HeaderKind::Ref:
+      case HeaderKind::ResumableFrame:
+      case HeaderKind::NativeData:
+      case HeaderKind::SmallMalloc:
+      case HeaderKind::BigMalloc:
+        break;
+      case HeaderKind::BigObj:
+      case HeaderKind::Hole:
+        assert(false && "forEachHeader skips these kinds");
+        break;
+    }
   });
 
   // check the apc array list
@@ -707,7 +755,7 @@ void* MemoryManager::sequentialAllocate(void*& cursor, void* limit,
     initHole(cursor, space);
   }
   
-  TRACE(3, "sequentialAllocate could not fit %d bytes in %lu space\n", bytes, space);
+  TRACE(2, "sequentialAllocate could not fit %d bytes in %lu space\n", bytes, space);
   return nullptr;
 }
 
@@ -721,9 +769,14 @@ void* MemoryManager::getNextLineInBlock() {
     m_lineCursor = nullptr;
     return nullptr;
   }
+  TRACE(2, "getNextLineInBlock got current block %p size(%lu)", b.ptr, b.size);
   // We don't ever backtrack into the current block, so we start at our current 
   // limit
-  uint32_t start = (uintptr_t(m_lineLimit) - uintptr_t(b.ptr)) / kLineSize;
+  if (b.ptr >= m_lineLimit) {
+    TRACE(1, "UH OH");
+  }
+  auto start = (uintptr_t(m_lineLimit) - uintptr_t(b.ptr)) / kLineSize;
+  TRACE(2, "getNextLineInBlock attempted, start(%lu)\n", start);
   return getFreeLines(b, start, m_lineCursor, m_lineLimit);
 }
 
@@ -744,16 +797,14 @@ void* MemoryManager::getFreeLines(const ImmixBlock& block, uint32_t start,
           if (block.lineMap[endLine] != 0) {
             limit = (void*)(uintptr_t(block.ptr) + endLine * kLineSize);
 
-            TRACE(3, "getFreeLines cursor %p limit %p\n",
-              cursor, limit);
+            TRACE(3, "getFreeLines cursor %p limit %p\n", cursor, limit);
             return cursor;
           }
         }
         // reached the end of the block without finding a marked line
         limit = (void*)(uintptr_t(block.ptr) + block.size);
 
-        TRACE(3, "getFreeLines cursor %p limit(end) %p\n",
-          cursor, limit);
+        TRACE(3, "getFreeLines cursor %p limit(end) %p\n", cursor, limit);
         return cursor;
       }
     }
@@ -771,12 +822,16 @@ void* MemoryManager::getNextRecyclableBlock() {
   while (true) {
     auto block = m_heap.getNextRecyclableBlock();
     if (block.ptr == nullptr) {
-      TRACE(3, "getNextRecyclableBlock returned null\n");
+      TRACE(2, "getNextRecyclableBlock returned null\n");
       m_lineCursor = nullptr;
       return nullptr;
     }
     void* ret = getFreeLines(block, /*start=*/0, m_lineCursor, m_lineLimit);
-    if (ret) return ret;
+    if (ret) {
+      TRACE(2, "getNextRecyclableBlock returned %p size(%lu)\n", m_lineCursor,
+        uintptr_t(m_lineLimit) - uintptr_t(m_lineCursor));
+      return ret;
+    } 
   }
 }
 
@@ -788,7 +843,7 @@ void* MemoryManager::getFreeBlock() {
   m_lineCursor = block.ptr;
   m_lineLimit = (void*)(uintptr_t(block.ptr) + block.size);
 
-  TRACE(3, "getFreeBlock %p size %lu\n", block.ptr, block.size);
+  TRACE(2, "getFreeBlock %p size %lu\n", block.ptr, block.size);
 
   return block.ptr;
 }
@@ -1070,6 +1125,7 @@ void BigHeap::reset() {
     free(slab.ptr);
   }
   m_slabs.clear();
+  m_pos = -1;
   for (auto n : m_bigs) {
     free(n);
   }
@@ -1151,6 +1207,7 @@ void BigHeap::markLineForSmall(const void* p) {
 
 void BigHeap::markLinesForMedium(const void* p, uint32_t size) {
   assert(size > kLineSize);
+  assert(size <= kMaxMediumSize);
   auto const ptrInt = reinterpret_cast<uintptr_t>(p);
   auto it = std::find_if(std::begin(m_slabs), std::end(m_slabs),
     [&] (ImmixBlock slab) {
@@ -1165,7 +1222,7 @@ void BigHeap::markLinesForMedium(const void* p, uint32_t size) {
   for(; lineNum < firstLine + numLines; lineNum++) {
     it->lineMap[lineNum] = 1; //mark the line
   }
-  TRACE(3, "Marked %u lines for medium size=%d\n", numLines, size);
+  TRACE(2, "Marked %u lines for medium size=%d\n", numLines, size);
 }
 
 // p should point to start of a line
@@ -1182,12 +1239,35 @@ void BigHeap::markBlockContaining(const void* p) {
 }
 
 ImmixBlock BigHeap::currentBlock() {
-  if (m_pos != -1) return m_slabs[m_pos];
+  if (m_pos != -1) {
+    assert(m_pos < m_slabs.size());
+    return m_slabs[m_pos];
+  }
   return ImmixBlock{nullptr, 0};
 }
 
 void BigHeap::resetBlockPointer() {
   m_pos = -1;
+}
+
+void BigHeap::freeUnusedBlocks() {
+  m_slabs.erase(
+    std::remove_if(
+      m_slabs.begin(),
+      m_slabs.end(),
+      [](const ImmixBlock& block) {
+        for (uint8_t lineMark : block.lineMap) {
+          if (lineMark != 0) {
+            return false;
+          }
+        }
+        free(block.ptr);
+        TRACE(2, "Freed block %p\n", block.ptr);
+        return true;
+      }
+    ),
+    m_slabs.end()
+  );
 }
 
 NEVER_INLINE

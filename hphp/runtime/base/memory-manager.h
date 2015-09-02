@@ -331,6 +331,7 @@ struct BigHeap {
   void markBlockContaining(const void* p);
 
   void resetBlockPointer();
+  void freeUnusedBlocks();
 
   // allocate a MemBlock of at least size bytes, track in m_slabs.
   MemBlock allocSlab(size_t size);
@@ -728,7 +729,7 @@ struct MemoryManager {
   void markBlockContaining(const void* p);
 
   void goToFirstRecyclableBlock();
-
+  void freeUnusedBlocks();
   /*
    * Run the experimental collector.
    */

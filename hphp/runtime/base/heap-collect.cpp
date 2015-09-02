@@ -211,8 +211,13 @@ bool Marker::mark(const void* p) {
   auto first = !h->hdr_.mark;
   h->hdr_.mark = true;
   // mark our line... somehow
-  MM().markLineForSmall(p);
-  MM().markBlockContaining(p); // super slow to do this here
+  if (h->size() <= kLineSize) {
+    MM().markLineForSmall(p);
+  } else if (h->size() <= kMaxMediumSize) {
+    MM().markLinesForMedium(p, h->size());
+  }
+  // large objects arent block/line allocated, so no mark needed
+  // TODO mark blocks?
   return first;
 }
 
@@ -432,7 +437,7 @@ void Marker::init() {
         break;
       case HK::Ref:
         // EZC non-ref refdatas sometimes have count==0
-        assert(h->hdr_.count > 0 || !h->ref_.zIsRef());
+        // assert(h->hdr_.count > 0 || !h->ref_.zIsRef());
         ptrs_.insert(h);
         total_ += h->size();
         break;
@@ -662,6 +667,7 @@ void Marker::sweep() {
   });
 
   // TODO blocks never get freed
+  mm.freeUnusedBlocks();
 
   // reset to start allocating into blocks from the start again
   mm.goToFirstRecyclableBlock();
@@ -678,12 +684,13 @@ void MemoryManager::collect() {
   TRACE_SET_MOD(mm);
   TRACE(1, "MemoryManager::collect() called\n");
   if (!RuntimeOption::EvalEnableGC || empty()) return;
+
   // initialise a freenode at the end of the current block
-  uint32_t space = uintptr_t(m_lineLimit) - uintptr_t(m_lineCursor);
-  if (space >= sizeof(FreeNode)) {
+  // TODO could be redundant
+  if (m_lineCursor) {
+    uint32_t space = uintptr_t(m_lineLimit) - uintptr_t(m_lineCursor);
+    assert(space == 0 || space >= sizeof(FreeNode));
     initHole(m_lineCursor, space);
-  } else {
-    assert(false && "uh oh, no space for free node");
   }
   
   Marker mkr;
