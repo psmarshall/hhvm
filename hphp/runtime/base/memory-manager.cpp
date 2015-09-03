@@ -182,6 +182,8 @@ void MemoryManager::OnThreadExit(MemoryManager* mm) {
 MemoryManager::MemoryManager()
     : m_lineCursor(nullptr)
     , m_lineLimit(nullptr)
+    , m_blockCursor(nullptr)
+    , m_blockLimit(nullptr)
     , m_sweeping(false) {
 #ifdef USE_JEMALLOC
   threadStats(m_allocated, m_deallocated, m_cactive, m_cactiveLimit);
@@ -645,7 +647,7 @@ static_assert(sizeof(header_names)/sizeof(*header_names) == NumHeaderKinds, "");
 
 // initialize a Hole header in the unused memory between m_front and m_limit
 void MemoryManager::initHole(void* ptr, uint32_t size) {
-  memset(ptr, kSmallFreeFill, size);
+  if (debug) memset(ptr, kSmallFreeFill, size);
   auto hdr = static_cast<FreeNode*>(ptr);
   hdr->hdr.kind = HeaderKind::Hole;
   hdr->size() = size;
@@ -729,16 +731,23 @@ void MemoryManager::checkHeap() {
   }
   assert(apc_strings.empty());
 
-  TRACE(1, "checkHeap: %lu totalLines %lu markedLines\n", totalLines, markedLines);
+  TRACE(1, "checkHeap: %lu totalLines %lu markedLines\n", totalLines,
+    markedLines);
 }
 
 void* MemoryManager::sequentialAllocate(void*& cursor, void* limit, 
-                                               uint32_t bytes) {
+                                        uint32_t bytes) {
+  if (!cursor) {
+    TRACE(3, "sequentialAllocate called with nullptr cursor for %d bytes\n",
+      bytes);
+    return nullptr;
+  }
   assert((uintptr_t(cursor) & kSmallSizeAlignMask) == 0);
   assert((uintptr_t(limit) & kSmallSizeAlignMask) == 0);
   assert(uintptr_t(cursor) <= uintptr_t(limit));
 
   auto space = uintptr_t(limit) - uintptr_t(cursor);
+  assert(space <= kBlockSize);
   if (bytes <= space) {
     // round to 16-byte alignment
     auto aligned_bytes = MemoryManager::align(bytes);
@@ -748,14 +757,16 @@ void* MemoryManager::sequentialAllocate(void*& cursor, void* limit,
 
     assert(uintptr_t(p) + aligned_bytes == uintptr_t(cursor));
     // the other assertions imply p is aligned here
-    TRACE(3, "sequentialAllocate fit %d bytes in %lu space\n", aligned_bytes, space);
+    TRACE(3, "sequentialAllocate fit %d bytes in %lu space\n", aligned_bytes,
+      space);
     return p;
   } else if (space != 0) {
     assert(space >= 16); // otherwise we can't fit a freenode header
     initHole(cursor, space);
   }
   
-  TRACE(2, "sequentialAllocate could not fit %d bytes in %lu space\n", bytes, space);
+  TRACE(2, "sequentialAllocate could not fit %d bytes in %lu space\n", bytes,
+    space);
   return nullptr;
 }
 
@@ -769,19 +780,15 @@ void* MemoryManager::getNextLineInBlock() {
     m_lineCursor = nullptr;
     return nullptr;
   }
-  TRACE(2, "getNextLineInBlock got current block %p size(%lu)", b.ptr, b.size);
   // We don't ever backtrack into the current block, so we start at our current 
   // limit
-  if (b.ptr >= m_lineLimit) {
-    TRACE(1, "UH OH");
-  }
   auto start = (uintptr_t(m_lineLimit) - uintptr_t(b.ptr)) / kLineSize;
   TRACE(2, "getNextLineInBlock attempted, start(%lu)\n", start);
   return getFreeLines(b, start, m_lineCursor, m_lineLimit);
 }
 
 void* MemoryManager::getFreeLines(const ImmixBlock& block, uint32_t start,
-                                      void*& cursor, void*& limit) {
+                                  void*& cursor, void*& limit) {
   uint32_t linesInBlock = block.size / kLineSize;
   assert(start <= linesInBlock);
 
@@ -835,13 +842,14 @@ void* MemoryManager::getNextRecyclableBlock() {
   }
 }
 
-void* MemoryManager::getFreeBlock() {
+void* MemoryManager::getFreeBlock(void*& cursor, void*& limit,
+                                  bool forOverflow) {
   if (debug && RuntimeOption::EvalCheckHeapOnAlloc) checkHeap();
-  auto block = m_heap.allocSlab(kBlockSize);
+  auto block = m_heap.allocSlab(kBlockSize, forOverflow);
   assert((uintptr_t(block.ptr) & kSmallSizeAlignMask) == 0);
 
-  m_lineCursor = block.ptr;
-  m_lineLimit = (void*)(uintptr_t(block.ptr) + block.size);
+  cursor = block.ptr;
+  limit = (void*)(uintptr_t(block.ptr) + block.size);
 
   TRACE(2, "getFreeBlock %p size %lu\n", block.ptr, block.size);
 
@@ -859,7 +867,7 @@ void* MemoryManager::allocSlowHot(uint32_t bytes) {
   if (m_lineCursor == nullptr) {
     getNextRecyclableBlock();
     if (m_lineCursor == nullptr) {
-      auto block = getFreeBlock();
+      auto block = getFreeBlock(m_lineCursor, m_lineLimit, false);
       if (block == nullptr) {
         return nullptr; //OOM
       }
@@ -872,21 +880,29 @@ void* MemoryManager::allocSlowHot(uint32_t bytes) {
  * pre: bytes is the size of a medium allocation
  */
 void* MemoryManager::overflowAlloc(uint32_t bytes) {
-  // assert(bytes > kLineSize && bytes <= kMaxMediumSize);
+  assert(bytes > kLineSize && bytes <= kMaxMediumSize);
 
-  // void* p = sequentialAllocate(blockCursor, blockLimit, bytes);
-  // if (p != nullptr) {
-  //   FTRACE(3, "overflowAlloc into block: {} -> {}\n", bytes, p);
-  //   return p;
-  // }
-  // // get a fresh block and allocate into it instead
-  // auto block = getFreeBlock();
-  // if (block == nullptr) {
-  //   return nullptr; //OOM
-  // }
-  // FTRACE(3, "overflowAlloc into *new* block: {} -> {}\n", bytes, p);
-  // return sequentialAllocate(blockCursor, blockLimit, bytes);
-  return nullptr;
+  void* p = sequentialAllocate(m_blockCursor, m_blockLimit, bytes);
+  if (p != nullptr) {
+    // TODO refactor
+    uint32_t space = uintptr_t(m_blockLimit) - uintptr_t(m_blockCursor);
+    assert(space == 0 || space >= sizeof(FreeNode));
+    initHole(m_blockCursor, space);
+    FTRACE(3, "overflowAlloc into block: {} -> {}\n", bytes, p);
+    return p;
+  }
+  // get a fresh block and allocate into it instead
+  auto block = getFreeBlock(m_blockCursor, m_blockLimit, true);
+  if (block == nullptr) {
+    return nullptr; //OOM
+  }
+  FTRACE(3, "overflowAlloc into *new* block: {} -> {}\n", bytes, block);
+  auto ret = sequentialAllocate(m_blockCursor, m_blockLimit, bytes);
+  // TODO refactor
+  uint32_t space = uintptr_t(m_blockLimit) - uintptr_t(m_blockCursor);
+  assert(space == 0 || space >= sizeof(FreeNode));
+  initHole(m_blockCursor, space);
+  return ret;
 }
 
 inline void MemoryManager::updateBigStats() {
@@ -1138,18 +1154,22 @@ void BigHeap::flush() {
   m_bigs = std::vector<BigNode*>{};
 }
 
-MemBlock BigHeap::allocSlab(size_t size) {
+MemBlock BigHeap::allocSlab(size_t size, bool forOverflow) {
   void* slab = safe_malloc(size);
   // probably not needed
   ImmixBlock b = ImmixBlock{slab, size};
+  if (forOverflow) b.overflow = 1;
   m_slabs.push_back(b);
-  m_pos = m_slabs.size() - 1; //overflowAlloc will struggle with this
+  if (!forOverflow) m_pos = m_slabs.size() - 1;
   return {slab, size};
 }
 
 ImmixBlock BigHeap::getNextRecyclableBlock() {
   if (!m_slabs.empty() && m_pos < m_slabs.size() - 1) {
-    ++m_pos;
+    while (m_slabs[++m_pos].overflow != 0) {
+      if (m_pos == m_slabs.size() - 1) return ImmixBlock{nullptr, 0};
+    }
+    assert(m_pos < m_slabs.size());
     return m_slabs[m_pos];
   }
   return ImmixBlock{nullptr, 0};

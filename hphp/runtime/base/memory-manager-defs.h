@@ -33,7 +33,6 @@ namespace HPHP {
 struct Header {
   size_t size() const;
   HeaderKind kind() const {
-    volatile auto me = this;
     assert(unsigned(hdr_.kind) <= NumHeaderKinds);
     return hdr_.kind;
   }

@@ -308,8 +308,9 @@ struct ImmixBlock {
   size_t size; // should always be kBlockSize
   uint8_t lineMap[kLinesPerBlock] = {}; // 256 lines per block for 32kB block
   uint8_t marked;
+  uint8_t overflow;
 
-  ImmixBlock(void* ptr, size_t size) : ptr(ptr), size(size), marked(0) {}
+  ImmixBlock(void* ptr, size_t size) : ptr(ptr), size(size), marked(0), overflow(0) {}
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -334,7 +335,7 @@ struct BigHeap {
   void freeUnusedBlocks();
 
   // allocate a MemBlock of at least size bytes, track in m_slabs.
-  MemBlock allocSlab(size_t size);
+  MemBlock allocSlab(size_t size, bool forOverflow);
 
   // the next recyclable block
   ImmixBlock getNextRecyclableBlock();
@@ -791,7 +792,7 @@ private:
   void* getFreeLines(const ImmixBlock& block, uint32_t start,
                      void*& cursor, void*& limit);
   void* getNextRecyclableBlock();
-  void* getFreeBlock();
+  void* getFreeBlock(void*& cursor, void*& limit, bool forOverflow);
   void* allocSlowHot(uint32_t bytes);
   void* overflowAlloc(uint32_t bytes);
 
@@ -870,6 +871,8 @@ private:
 
   void* m_lineCursor;
   void* m_lineLimit;
+  void* m_blockCursor;
+  void* m_blockLimit;
   StringDataNode m_strings; // in-place node is head of circular list
   std::vector<APCLocalArray*> m_apc_arrays;
   MemoryUsageStats m_stats;

@@ -181,11 +181,11 @@ inline void* MemoryManager::mallocSmallSize(uint32_t bytes) {
     FTRACE(3, "mallocSmallSize: {} -> {}\n", bytes, p);
     return p;
   }
-  // if (bytes <= kLineSize) {
+  if (bytes <= kLineSize) {
     return allocSlowHot(bytes);
-  // }
+  }
   // Don't overflow alloc yet
-  // return overflowAlloc(bytes);
+  return overflowAlloc(bytes);
 }
 
 inline void MemoryManager::freeSmallSize(void* ptr, uint32_t bytes) {
@@ -327,6 +327,9 @@ inline void MemoryManager::goToFirstRecyclableBlock() {
   m_heap.resetBlockPointer();
   // advance to next free line in first block or subsequent blocks
   getNextRecyclableBlock();
+
+  m_blockCursor = nullptr;
+  m_blockLimit = nullptr;
 }
 
 inline void MemoryManager::freeUnusedBlocks() {

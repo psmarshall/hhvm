@@ -657,16 +657,17 @@ void Marker::sweep() {
   }
 
   // immix free lines
-  mm.forEachLine([&](void* line, uint8_t& markByte) {
-    if (markByte == 0) {
-      TRACE(2, "line freed %p", line);
-      // memset(line, kSmallFreeFill, kLineSize);
-    } else {
-      TRACE(2, "line kept %p", line);
-    }
-  });
+  if (debug) {
+    mm.forEachLine([&](void* line, uint8_t& markByte) {
+      if (markByte == 0) {
+        TRACE(2, "line freed %p", line);
+        memset(line, kSmallFreeFill, kLineSize);
+      } else {
+        TRACE(2, "line kept %p", line);
+      }
+    });
+  }
 
-  // TODO blocks never get freed
   mm.freeUnusedBlocks();
 
   // reset to start allocating into blocks from the start again
