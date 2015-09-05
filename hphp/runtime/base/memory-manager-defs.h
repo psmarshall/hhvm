@@ -33,6 +33,7 @@ namespace HPHP {
 struct Header {
   size_t size() const;
   HeaderKind kind() const {
+    volatile auto me = this;
     assert(unsigned(hdr_.kind) <= NumHeaderKinds);
     return hdr_.kind;
   }
@@ -187,6 +188,7 @@ template<class Fn> void BigHeap::iterate(Fn fn) {
       auto size = hdr->hdr_.kind == HeaderKind::Hole ||
                   hdr->hdr_.kind == HeaderKind::Free ? hdr->free_.size() :
                   hdr->size();
+      assert(size >= 0 && "size=0 causes infinite loop");
       // does this make sense ?
       // size can sometimes not be aligned
       size = MemoryManager::align(size);
