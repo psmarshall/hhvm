@@ -160,7 +160,7 @@ ALWAYS_INLINE bool decReleaseCheck(GCByte gcbyte) {
 #define IMPLEMENT_COUNTABLE_METHODS_NO_STATIC                           \
   bool isRefCounted() const {                                           \
     assert(kindIsValid());                                              \
-    return CountableManipNS::isRefCounted(m_hdr._static);               \
+    return CountableManipNS::isRefCounted(m_hdr.gcbyte);                \
   }                                                                     \
   bool hasMultipleRefs() const {                                        \
     assert(kindIsValid());                                              \

@@ -703,7 +703,7 @@ static std::string toStringElm(const TypedValue* tv) {
     if (TV_GENERIC_DISPATCH(*tv, isStatic)) {
       os << ":c(static)";
     } else {
-      os << ":c(" << TV_GENERIC_DISPATCH(*tv, maybeShared) << ")";
+      os << ":c(" << TV_GENERIC_DISPATCH(*tv, hasMultipleRefs) << ")";
     }
   };
 

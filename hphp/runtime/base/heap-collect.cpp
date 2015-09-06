@@ -661,6 +661,7 @@ void Marker::sweep() {
     mm.forEachLine([&](void* line, uint8_t& markByte) {
       if (markByte == 0) {
         TRACE(2, "line freed %p", line);
+        markByte = 1; // TODO remove
       } else {
         TRACE(2, "line kept %p", line);
       }
