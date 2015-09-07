@@ -684,6 +684,8 @@ void Marker::sweep() {
 void MemoryManager::collect() {
   TRACE_SET_MOD(mm);
   TRACE(1, "MemoryManager::collect() called\n");
+  // FTRACE(1, "allocated: {}, debumped: {}, ratio: {}\n", m_bumped,
+  //   m_debumped, (m_debumped/m_bumped) * 100);
   if (!RuntimeOption::EvalEnableGC || empty()) return;
 
   // initialise a freenode at the end of the current block

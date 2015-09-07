@@ -184,6 +184,9 @@ MemoryManager::MemoryManager()
     , m_lineLimit(nullptr)
     , m_blockCursor(nullptr)
     , m_blockLimit(nullptr)
+    , m_lastAllocPtr(nullptr)
+    , m_bumped(0)
+    , m_debumped(0)
     , m_sweeping(false) {
 #ifdef USE_JEMALLOC
   threadStats(m_allocated, m_deallocated, m_cactive, m_cactiveLimit);

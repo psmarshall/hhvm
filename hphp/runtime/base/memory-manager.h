@@ -875,6 +875,10 @@ private:
   void* m_lineLimit;
   void* m_blockCursor;
   void* m_blockLimit;
+
+  uint32_t m_bumped, m_debumped;
+  void* m_lastAllocPtr;
+
   StringDataNode m_strings; // in-place node is head of circular list
   std::vector<APCLocalArray*> m_apc_arrays;
   MemoryUsageStats m_stats;
