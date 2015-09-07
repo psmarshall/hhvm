@@ -509,19 +509,19 @@ void Marker::trace() {
   }
   // mark all immix lines containing SmallMalloc headers
   // because we don't actually free them yet
-  // MM().forEachHeader([&](Header* h) {
-  //   if (h->kind() == HK::SmallMalloc) {
-  //     // mark line
-  //     TRACE_SET_MOD(mm);
-  //     TRACE(2, "Marking line for SmallMalloc at %p\n", h);
-  //     if (h->size() > kLineSize) {
-  //       TRACE(2, "Marking multiple lines for SmallMalloc at %p\n", h);
-  //       MM().markLinesForMedium(h, h->size());
-  //     } else {
-  //       MM().markLineForSmall(h);
-  //     }
-  //   }
-  // });
+  MM().forEachHeader([&](Header* h) {
+    if (h->kind() == HK::SmallMalloc) {
+      // mark line
+      TRACE_SET_MOD(mm);
+      TRACE(2, "Marking line for SmallMalloc at %p\n", h);
+      if (h->size() > kLineSize) {
+        TRACE(2, "Marking multiple lines for SmallMalloc at %p\n", h);
+        MM().markLinesForMedium(h, h->size());
+      } else {
+        MM().markLineForSmall(h);
+      }
+    }
+  });
 }
 
 // check that headers have a "sensible" state during sweeping.

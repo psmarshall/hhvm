@@ -647,6 +647,8 @@ static_assert(sizeof(header_names)/sizeof(*header_names) == NumHeaderKinds, "");
 
 // initialize a Hole header in the unused memory between m_front and m_limit
 void MemoryManager::initHole(void* ptr, uint32_t size) {
+  if (size == 0) return;
+  assert(size >= sizeof(FreeNode));
   if (debug) memset(ptr, kSmallFreeFill, size);
   auto hdr = static_cast<FreeNode*>(ptr);
   hdr->hdr.kind = HeaderKind::Hole;
@@ -828,6 +830,7 @@ void* MemoryManager::getFreeLines(const ImmixBlock& block, uint32_t start,
 void* MemoryManager::getNextRecyclableBlock() {
   while (true) {
     auto block = m_heap.getNextRecyclableBlock();
+    assert(block.overflow == 0);
     if (block.ptr == nullptr) {
       TRACE(2, "getNextRecyclableBlock returned null\n");
       m_lineCursor = nullptr;
@@ -888,20 +891,21 @@ void* MemoryManager::overflowAlloc(uint32_t bytes) {
     uint32_t space = uintptr_t(m_blockLimit) - uintptr_t(m_blockCursor);
     assert(space == 0 || space >= sizeof(FreeNode));
     initHole(m_blockCursor, space);
-    FTRACE(3, "overflowAlloc into block: {} -> {}\n", bytes, p);
+    FTRACE(2, "overflowAlloc into block: {} -> {}\n", bytes, p);
     return p;
   }
   // get a fresh block and allocate into it instead
   auto block = getFreeBlock(m_blockCursor, m_blockLimit, true);
   if (block == nullptr) {
+    FTRACE(1, "overflowAlloc OOM: {}\n", bytes);
     return nullptr; //OOM
   }
-  FTRACE(3, "overflowAlloc into *new* block: {} -> {}\n", bytes, block);
   auto ret = sequentialAllocate(m_blockCursor, m_blockLimit, bytes);
   // TODO refactor
   uint32_t space = uintptr_t(m_blockLimit) - uintptr_t(m_blockCursor);
   assert(space == 0 || space >= sizeof(FreeNode));
   initHole(m_blockCursor, space);
+  FTRACE(2, "overflowAlloc into *new* block: {} -> {}\n", bytes, ret);
   return ret;
 }
 
@@ -1149,28 +1153,28 @@ void BigHeap::reset() {
 }
 
 void BigHeap::dump() {
-  TRACE(2, "BigHeap dump:\n\n");
-  auto charCounter = 0, blockCounter = 0;
-  MM().forEachHeader([&](Header* h) {
-    auto size = MemoryManager::align(h->size());
-    for (uintptr_t p = uintptr_t(h); p < uintptr_t(h) + size; p += 16) {
-      if (charCounter == 64) {
-        TRACE(2, "\n");
-        charCounter = 0;
-      }
-      if (blockCounter == 2048) {
-        TRACE(2, "\n");
-        blockCounter = 0;
-      }
-      if (h->kind() == HeaderKind::Hole) {
-        TRACE(2, "-");
-      } else {
-        TRACE(2, "x");
-      }
-      charCounter++;
-      blockCounter++;
-    }
-  });
+  // TRACE(2, "BigHeap dump:\n\n");
+  // auto charCounter = 0, blockCounter = 0;
+  // MM().forEachHeader([&](Header* h) {
+  //   auto size = MemoryManager::align(h->size());
+  //   for (uintptr_t p = uintptr_t(h); p < uintptr_t(h) + size; p += 16) {
+  //     if (charCounter == 64) {
+  //       TRACE(2, "\n");
+  //       charCounter = 0;
+  //     }
+  //     if (blockCounter == 2048) {
+  //       TRACE(2, "\n");
+  //       blockCounter = 0;
+  //     }
+  //     if (h->kind() == HeaderKind::Hole) {
+  //       TRACE(2, "-");
+  //     } else {
+  //       TRACE(2, "x");
+  //     }
+  //     charCounter++;
+  //     blockCounter++;
+  //   }
+  // });
 }
 
 void BigHeap::flush() {
@@ -1195,6 +1199,7 @@ ImmixBlock BigHeap::getNextRecyclableBlock() {
       if (m_pos == m_slabs.size() - 1) return ImmixBlock{nullptr, 0};
     }
     assert(m_pos < m_slabs.size());
+    assert(m_slabs[m_pos].overflow == 0);
     return m_slabs[m_pos];
   }
   return ImmixBlock{nullptr, 0};
