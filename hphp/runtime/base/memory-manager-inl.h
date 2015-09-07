@@ -181,11 +181,11 @@ inline void* MemoryManager::mallocSmallSize(uint32_t bytes) {
     FTRACE(3, "mallocSmallSize: {} -> {}\n", bytes, p);
     return p;
   }
-  if (bytes <= kLineSize) {
+  // if (bytes <= kLineSize) {
     return allocSlowHot(bytes);
-  }
+  // }
   // Don't overflow alloc yet
-  return overflowAlloc(bytes);
+  // return overflowAlloc(bytes);
 }
 
 inline void MemoryManager::freeSmallSize(void* ptr, uint32_t bytes) {

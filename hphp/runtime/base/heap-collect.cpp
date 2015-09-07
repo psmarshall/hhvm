@@ -210,14 +210,6 @@ bool Marker::mark(const void* p) {
   assert(h->kind() <= HK::BigMalloc && h->kind() != HK::ResumableObj);
   auto first = !h->hdr_.mark;
   h->hdr_.mark = true;
-  // mark our line... somehow
-  if (h->size() <= kLineSize) {
-    MM().markLineForSmall(p);
-  } else if (h->size() <= kMaxMediumSize) {
-    MM().markLinesForMedium(p, h->size());
-  }
-  // large objects arent block/line allocated, so no mark needed
-  // TODO mark blocks?
   return first;
 }
 
@@ -517,19 +509,19 @@ void Marker::trace() {
   }
   // mark all immix lines containing SmallMalloc headers
   // because we don't actually free them yet
-  MM().forEachHeader([&](Header* h) {
-    if (h->kind() == HK::SmallMalloc) {
-      // mark line
-      TRACE_SET_MOD(mm);
-      TRACE(2, "Marking line for SmallMalloc at %p\n", h);
-      if (h->size() > kLineSize) {
-        TRACE(2, "Marking multiple lines for SmallMalloc at %p\n", h);
-        MM().markLinesForMedium(h, h->size());
-      } else {
-        MM().markLineForSmall(h);
-      }
-    }
-  });
+  // MM().forEachHeader([&](Header* h) {
+  //   if (h->kind() == HK::SmallMalloc) {
+  //     // mark line
+  //     TRACE_SET_MOD(mm);
+  //     TRACE(2, "Marking line for SmallMalloc at %p\n", h);
+  //     if (h->size() > kLineSize) {
+  //       TRACE(2, "Marking multiple lines for SmallMalloc at %p\n", h);
+  //       MM().markLinesForMedium(h, h->size());
+  //     } else {
+  //       MM().markLineForSmall(h);
+  //     }
+  //   }
+  // });
 }
 
 // check that headers have a "sensible" state during sweeping.
@@ -591,6 +583,16 @@ void Marker::sweep() {
   mm.iterate([&](Header* h) {
     assert(check_sweep_header(h));
     auto size = h->size(); // internal size
+    if (h->kind() != HK::Free && h->kind() != HK::Hole) {
+      // mark our line... somehow
+      if (h->size() <= kLineSize) {
+        mm.markLineForSmall(h);
+      } else if (h->size() <= kMaxMediumSize) {
+        mm.markLinesForMedium(h, h->size());
+      }
+      // large objects arent block/line allocated, so no mark needed
+      // TODO mark blocks?
+    }
     if (h->hdr_.mark) {
       marked += size;
       if (h->hdr_.cmark) ambig += size;
@@ -657,16 +659,16 @@ void Marker::sweep() {
   }
 
   // immix free lines
-  if (debug) {
+  // if (debug) {
     mm.forEachLine([&](void* line, uint8_t& markByte) {
       if (markByte == 0) {
         TRACE(2, "line freed %p", line);
-        markByte = 1; // TODO remove
+        // markByte = 1; // TODO remove
       } else {
         TRACE(2, "line kept %p", line);
       }
     });
-  }
+  // }
 
   mm.freeUnusedBlocks();
 
@@ -693,6 +695,8 @@ void MemoryManager::collect() {
     assert(space == 0 || space >= sizeof(FreeNode));
     initHole(m_lineCursor, space);
   }
+
+  m_heap.dump();
   
   Marker mkr;
   mkr.init();

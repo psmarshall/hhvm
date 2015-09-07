@@ -1148,6 +1148,31 @@ void BigHeap::reset() {
   m_bigs.clear();
 }
 
+void BigHeap::dump() {
+  TRACE(2, "BigHeap dump:\n\n");
+  auto charCounter = 0, blockCounter = 0;
+  MM().forEachHeader([&](Header* h) {
+    auto size = MemoryManager::align(h->size());
+    for (uintptr_t p = uintptr_t(h); p < uintptr_t(h) + size; p += 16) {
+      if (charCounter == 64) {
+        TRACE(2, "\n");
+        charCounter = 0;
+      }
+      if (blockCounter == 2048) {
+        TRACE(2, "\n");
+        blockCounter = 0;
+      }
+      if (h->kind() == HeaderKind::Hole) {
+        TRACE(2, "-");
+      } else {
+        TRACE(2, "x");
+      }
+      charCounter++;
+      blockCounter++;
+    }
+  });
+}
+
 void BigHeap::flush() {
   assert(empty());
   m_slabs = std::vector<ImmixBlock>{};
@@ -1238,11 +1263,12 @@ void BigHeap::markLinesForMedium(const void* p, uint32_t size) {
   assert(it != std::end(m_slabs));
   auto lineNum = (ptrInt - uintptr_t(it->ptr)) / kLineSize;
   auto firstLine = lineNum;
-  auto numLines = (size / kLineSize) + 1;
-  for(; lineNum < firstLine + numLines; lineNum++) {
+  auto lastLine = ((ptrInt + size) - uintptr_t(it->ptr)) / kLineSize;
+  for(; lineNum <= lastLine; lineNum++) {
     it->lineMap[lineNum] = 1; //mark the line
   }
-  TRACE(2, "Marked %u lines for medium size=%d\n", numLines, size);
+  FTRACE(2, "Marked {} lines for medium size={}\n",
+    lastLine - firstLine + 1, size);
 }
 
 // p should point to start of a line
