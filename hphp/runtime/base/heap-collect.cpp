@@ -583,7 +583,7 @@ void Marker::sweep() {
   mm.iterate([&](Header* h) {
     assert(check_sweep_header(h));
     auto size = h->size(); // internal size
-    if (h->kind() != HK::Free && h->kind() != HK::Hole) {
+    if (h->hdr_.mark) {
       // mark our line... somehow
       if (h->size() <= kLineSize) {
         mm.markLineForSmall(h);
@@ -592,8 +592,6 @@ void Marker::sweep() {
       }
       // large objects arent block/line allocated, so no mark needed
       // TODO mark blocks?
-    }
-    if (h->hdr_.mark) {
       marked += size;
       if (h->hdr_.cmark) ambig += size;
       return; // continue foreach loop
