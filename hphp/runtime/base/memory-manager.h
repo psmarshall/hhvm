@@ -227,7 +227,7 @@ constexpr uint32_t kSmallSizeAlignMask = kSmallSizeAlign - 1;
 
 constexpr unsigned kLgSizeClassesPerDoubling = 2;
 
-constexpr unsigned kLineSize = 128;
+constexpr unsigned kLineSize = 64;
 constexpr unsigned kBlockSize = 32768;
 constexpr unsigned kMaxMediumSize = 8192; //8kB is max medium object (1/4 block)
 constexpr unsigned kLinesPerBlock = kBlockSize / kLineSize;

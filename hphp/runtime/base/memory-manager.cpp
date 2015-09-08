@@ -668,6 +668,7 @@ void MemoryManager::checkHeap() {
     assert(space == 0 || space >= sizeof(FreeNode));
     initHole(m_lineCursor, space);
   }
+  m_lastAllocPtr = nullptr;
 
   size_t markedLines = 0, totalLines = 0;
   std::unordered_set<FreeNode*> free_blocks;
