@@ -696,6 +696,11 @@ void MemoryManager::collect() {
     initHole(m_lineCursor, space);
   }
 
+  // need to do this here, in case the most recently allocated object
+  // is free'd during the sweep, in which case a proper free-node would
+  // not be initialised.
+  m_lastAllocPtr = nullptr;
+
   m_heap.dump();
   
   Marker mkr;

@@ -180,11 +180,11 @@ void MemoryManager::OnThreadExit(MemoryManager* mm) {
 }
 
 MemoryManager::MemoryManager()
-    : m_lineCursor(nullptr)
+    : m_lastAllocPtr(nullptr)
+    , m_lineCursor(nullptr)
     , m_lineLimit(nullptr)
     , m_blockCursor(nullptr)
     , m_blockLimit(nullptr)
-    , m_lastAllocPtr(nullptr)
     , m_bumped(0)
     , m_debumped(0)
     , m_sweeping(false) {
@@ -742,11 +742,6 @@ void MemoryManager::checkHeap() {
 
 void* MemoryManager::sequentialAllocate(void*& cursor, void* limit, 
                                         uint32_t bytes) {
-  if (!cursor) {
-    TRACE(3, "sequentialAllocate called with nullptr cursor for %d bytes\n",
-      bytes);
-    return nullptr;
-  }
   assert((uintptr_t(cursor) & kSmallSizeAlignMask) == 0);
   assert((uintptr_t(limit) & kSmallSizeAlignMask) == 0);
   assert(uintptr_t(cursor) <= uintptr_t(limit));
@@ -782,7 +777,7 @@ void* MemoryManager::sequentialAllocate(void*& cursor, void* limit,
 void* MemoryManager::getNextLineInBlock() {
   ImmixBlock b = m_heap.currentBlock();
   if (b.ptr == nullptr) {
-    m_lineCursor = nullptr;
+    m_lineCursor = m_lineLimit = nullptr;
     return nullptr;
   }
   // We don't ever backtrack into the current block, so we start at our current 
@@ -836,7 +831,7 @@ void* MemoryManager::getNextRecyclableBlock() {
     assert(block.overflow == 0);
     if (block.ptr == nullptr) {
       TRACE(2, "getNextRecyclableBlock returned null\n");
-      m_lineCursor = nullptr;
+      m_lineCursor = m_lineLimit = nullptr;
       return nullptr;
     }
     void* ret = getFreeLines(block, /*start=*/0, m_lineCursor, m_lineLimit);
@@ -850,9 +845,18 @@ void* MemoryManager::getNextRecyclableBlock() {
 
 void* MemoryManager::getFreeBlock(void*& cursor, void*& limit,
                                   bool forOverflow) {
+  if (UNLIKELY(m_stats.usage > m_stats.maxBytes)) {
+    refreshStats();
+  }
   if (debug && RuntimeOption::EvalCheckHeapOnAlloc) checkHeap();
   auto block = m_heap.allocSlab(kBlockSize, forOverflow);
+
   assert((uintptr_t(block.ptr) & kSmallSizeAlignMask) == 0);
+  m_stats.borrow(block.size);
+  m_stats.alloc += block.size;
+  if (m_stats.alloc > m_stats.peakAlloc) {
+    m_stats.peakAlloc = m_stats.alloc;
+  }
 
   cursor = block.ptr;
   limit = (void*)(uintptr_t(block.ptr) + block.size);

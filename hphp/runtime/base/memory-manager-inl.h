@@ -176,8 +176,10 @@ inline void* MemoryManager::mallocSmallSize(uint32_t bytes) {
   assert(bytes > 0);
   assert(bytes <= kMaxMediumSize);
 
+  m_stats.usage += bytes;
+
   void* p = sequentialAllocate(m_lineCursor, m_lineLimit, bytes);
-  if (p != nullptr) {
+  if (LIKELY(p != nullptr)) {
     // m_bumped++;
     m_lastAllocPtr = p;
     FTRACE(3, "mallocSmallSize: {} -> {}\n", bytes, p);
@@ -203,7 +205,6 @@ inline void MemoryManager::freeSmallSize(void* ptr, uint32_t bytes) {
   if (ptr == m_lastAllocPtr) {
     // m_debumped++;
     m_lineCursor = m_lastAllocPtr;
-    m_lastAllocPtr = nullptr;
   } else {
     initHole(ptr, bytes);
   }
