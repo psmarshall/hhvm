@@ -48,6 +48,7 @@ struct MemoryManager;
 struct ObjectData;
 struct ResourceData;
 struct ExtendedException;
+struct Header;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -227,7 +228,7 @@ constexpr uint32_t kSmallSizeAlignMask = kSmallSizeAlign - 1;
 
 constexpr unsigned kLgSizeClassesPerDoubling = 2;
 
-constexpr unsigned kLineSize = 64;
+constexpr unsigned kLineSize = 128;
 constexpr unsigned kBlockSize = 32768;
 constexpr unsigned kMaxMediumSize = 8192; //8kB is max medium object (1/4 block)
 constexpr unsigned kLinesPerBlock = kBlockSize / kLineSize;
@@ -333,6 +334,8 @@ struct BigHeap {
 
   void resetBlockPointer();
   void freeUnusedBlocks();
+
+  std::vector<BigNode*> getBigs();
 
   void dump();
 
@@ -813,8 +816,6 @@ private:
   void logDeallocation(void*);
 
   void checkHeap();
-  void initHole(void* ptr, uint32_t size);
-  void initHole();
   void initFree();
 
   void dropRootMaps();
@@ -871,14 +872,12 @@ private:
 private:
   TRACE_SET_MOD(mm);
 
-  void* m_lastAllocPtr;
   void* m_lineCursor;
   void* m_lineLimit;
   void* m_blockCursor;
   void* m_blockLimit;
 
-  uint32_t m_bumped, m_debumped;
-
+  std::vector<std::pair<Header*, std::size_t>> m_heap_allocations;
   StringDataNode m_strings; // in-place node is head of circular list
   std::vector<APCLocalArray*> m_apc_arrays;
   MemoryUsageStats m_stats;

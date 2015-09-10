@@ -87,7 +87,7 @@ APCLocalArray::~APCLocalArray() {
     req::free(m_localCache);
   }
   m_arr->getHandle()->unreference();
-  MM().removeApcArray(this);
+  // MM().removeApcArray(this);
 }
 
 void APCLocalArray::Release(ArrayData* ad) {

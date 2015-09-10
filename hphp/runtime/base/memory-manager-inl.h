@@ -180,8 +180,6 @@ inline void* MemoryManager::mallocSmallSize(uint32_t bytes) {
 
   void* p = sequentialAllocate(m_lineCursor, m_lineLimit, bytes);
   if (LIKELY(p != nullptr)) {
-    // m_bumped++;
-    m_lastAllocPtr = p;
     FTRACE(3, "mallocSmallSize: {} -> {}\n", bytes, p);
     return p;
   }
@@ -202,12 +200,7 @@ inline void MemoryManager::freeSmallSize(void* ptr, uint32_t bytes) {
   }
 
   if (debug) eagerGCCheck();
-  if (ptr == m_lastAllocPtr) {
-    // m_debumped++;
-    m_lineCursor = m_lastAllocPtr;
-  } else {
-    initHole(ptr, bytes);
-  }
+  // initHole(ptr, bytes);
   m_stats.usage -= bytes;
 
   FTRACE(3, "freeSmallSize: {} ({} bytes)\n", ptr, bytes);

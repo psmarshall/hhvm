@@ -469,7 +469,7 @@ void StringData::releaseDataSlowPath() {
   assert(checkSane());
   sharedPayload()->shared->getHandle()->unreference();
   delist();
-  MM().freeSmallSize(this, sizeof(StringData) + sizeof(SharedPayload));
+  // MM().freeSmallSize(this, sizeof(StringData) + sizeof(SharedPayload));
 }
 
 void StringData::release() noexcept {
@@ -479,14 +479,14 @@ void StringData::release() noexcept {
   // encoded value is above Threshold, the value after decoding is also
   // above Threshold.
   if (LIKELY(m_hdr.aux.code <= kMaxStringSimpleLen)) {
-    auto const size = kCapOverhead + m_hdr.aux.code;
-    MM().freeSmallSize(this, size);
+    // auto const size = kCapOverhead + m_hdr.aux.code;
+    // MM().freeSmallSize(this, size);
     return;
   }
 
   auto const size = capacity() + kCapOverhead;
   if (size <= kMaxMediumSize) {
-    MM().freeSmallSize(this, size);
+    // MM().freeSmallSize(this, size);
     return;
   }
   MM().freeBigSize(this, size);

@@ -180,13 +180,10 @@ void MemoryManager::OnThreadExit(MemoryManager* mm) {
 }
 
 MemoryManager::MemoryManager()
-    : m_lastAllocPtr(nullptr)
-    , m_lineCursor(nullptr)
+    : m_lineCursor(nullptr)
     , m_lineLimit(nullptr)
     , m_blockCursor(nullptr)
     , m_blockLimit(nullptr)
-    , m_bumped(0)
-    , m_debumped(0)
     , m_sweeping(false) {
 #ifdef USE_JEMALLOC
   threadStats(m_allocated, m_deallocated, m_cactive, m_cactiveLimit);
@@ -528,6 +525,8 @@ void MemoryManager::resetAllocator() {
   // free the heap
   m_heap.reset();
 
+  m_heap_allocations.clear();
+
   m_lineCursor = m_lineLimit = nullptr;
 
   resetStatsImpl(true);
@@ -648,40 +647,22 @@ const char* header_names[] = {
 };
 static_assert(sizeof(header_names)/sizeof(*header_names) == NumHeaderKinds, "");
 
-// initialize a Hole header in the unused memory between m_front and m_limit
-void MemoryManager::initHole(void* ptr, uint32_t size) {
-  if (size == 0) return;
-  assert(size >= sizeof(FreeNode));
-  if (debug) memset(ptr, kSmallFreeFill, size);
-  auto hdr = static_cast<FreeNode*>(ptr);
-  hdr->hdr.kind = HeaderKind::Hole;
-  hdr->size() = size;
-}
-
 // test iterating objects in slabs
 void MemoryManager::checkHeap() {
 
-  // initialise a freenode at the end of the current block
-  // TODO could be redundant
-  if (m_lineCursor) {
-    uint32_t space = uintptr_t(m_lineLimit) - uintptr_t(m_lineCursor);
-    assert(space == 0 || space >= sizeof(FreeNode));
-    initHole(m_lineCursor, space);
-  }
-  m_lastAllocPtr = nullptr;
-
   size_t markedLines = 0, totalLines = 0;
   std::unordered_set<FreeNode*> free_blocks;
-  std::unordered_set<APCLocalArray*> apc_arrays;
-  std::unordered_set<StringData*> apc_strings;
+  std::unordered_set<const APCLocalArray*> apc_arrays;
+  std::unordered_set<const StringData*> apc_strings;
 
   forEachLine([&](void* p, uint8_t markByte) {
     ++totalLines;
     if (markByte > 0 ) ++markedLines;
-    TRACE(3, "checkHeap: line %p\n markByte(%d)\n", p, markByte);
+    TRACE(4, "checkHeap: line %p\n markByte(%d)\n", p, markByte);
   });
 
-  forEachHeader([&](Header* h) {
+  for (auto& pair : m_heap_allocations) {
+    auto h = pair.first;
     switch (h->kind()) {
       case HeaderKind::Apc:
         apc_arrays.insert(&h->apc_);
@@ -711,14 +692,14 @@ void MemoryManager::checkHeap() {
       case HeaderKind::ResumableFrame:
       case HeaderKind::NativeData:
       case HeaderKind::SmallMalloc:
-      case HeaderKind::BigMalloc:
         break;
+      case HeaderKind::BigMalloc:
       case HeaderKind::BigObj:
       case HeaderKind::Hole:
-        assert(false && "forEachHeader skips these kinds");
+        assert(false && "get outta here");
         break;
     }
-  });
+  }
 
   // check the apc array list
   for (auto a : m_apc_arrays) {
@@ -760,10 +741,10 @@ void* MemoryManager::sequentialAllocate(void*& cursor, void* limit,
     // the other assertions imply p is aligned here
     TRACE(3, "sequentialAllocate fit %d bytes in %lu space\n", aligned_bytes,
       space);
+
+    // All allocation happens here
+    m_heap_allocations.emplace_back((Header*)p, aligned_bytes);
     return p;
-  } else if (space != 0) {
-    assert(space >= 16); // otherwise we can't fit a freenode header
-    initHole(cursor, space);
   }
   
   TRACE(2, "sequentialAllocate could not fit %d bytes in %lu space\n", bytes,
@@ -895,10 +876,6 @@ void* MemoryManager::overflowAlloc(uint32_t bytes) {
 
   void* p = sequentialAllocate(m_blockCursor, m_blockLimit, bytes);
   if (p != nullptr) {
-    // TODO refactor
-    uint32_t space = uintptr_t(m_blockLimit) - uintptr_t(m_blockCursor);
-    assert(space == 0 || space >= sizeof(FreeNode));
-    initHole(m_blockCursor, space);
     FTRACE(2, "overflowAlloc into block: {} -> {}\n", bytes, p);
     return p;
   }
@@ -909,10 +886,6 @@ void* MemoryManager::overflowAlloc(uint32_t bytes) {
     return nullptr; //OOM
   }
   auto ret = sequentialAllocate(m_blockCursor, m_blockLimit, bytes);
-  // TODO refactor
-  uint32_t space = uintptr_t(m_blockLimit) - uintptr_t(m_blockCursor);
-  assert(space == 0 || space >= sizeof(FreeNode));
-  initHole(m_blockCursor, space);
   FTRACE(2, "overflowAlloc into *new* block: {} -> {}\n", bytes, ret);
   return ret;
 }
@@ -1189,6 +1162,10 @@ void BigHeap::flush() {
   assert(empty());
   m_slabs = std::vector<ImmixBlock>{};
   m_bigs = std::vector<BigNode*>{};
+}
+
+std::vector<BigNode*> BigHeap::getBigs() {
+  return m_bigs;
 }
 
 MemBlock BigHeap::allocSlab(size_t size, bool forOverflow) {

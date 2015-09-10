@@ -120,9 +120,9 @@ void tweak_variant_dtors() {
 
 Variant::~Variant() noexcept {
   tvRefcountedDecRef(asTypedValue());
-  if (debug) {
-    memset(this, kTVTrashFill2, sizeof(*this));
-  }
+  // if (debug) {
+  //   memset(this, kTVTrashFill2, sizeof(*this));
+  // }
 }
 
 void tvDecRefHelper(DataType type, uint64_t datum) noexcept {
