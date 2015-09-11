@@ -22,6 +22,7 @@
 #include <utility>
 #include <set>
 #include <unordered_map>
+#include <bitset>
 
 #include <folly/Memory.h>
 
@@ -310,8 +311,23 @@ struct ImmixBlock {
   uint8_t lineMap[kLinesPerBlock] = {}; // 256 lines per block for 32kB block
   uint8_t marked;
   uint8_t overflow;
-
+  // 1 bit per 16 bytes/128 bits in the heap
+  std::bitset<kBlockSize / 16> map;
   ImmixBlock(void* ptr, size_t size) : ptr(ptr), size(size), marked(0), overflow(0) {}
+
+  void setMapBit(void* p) {
+    assert(uintptr_t(p) >= uintptr_t(ptr));
+    assert(uintptr_t(p) < uintptr_t(ptr) + size);
+    auto bit_pos = ((uintptr_t(p) - uintptr_t(ptr)) / 16);
+    map[bit_pos] = true;
+  }
+
+  bool testMapBit(void* p) {
+    assert(uintptr_t(p) >= uintptr_t(ptr));
+    assert(uintptr_t(p) < uintptr_t(ptr) + size);
+    auto bit_pos = ((uintptr_t(p) - uintptr_t(ptr)) / 16);
+    return map[bit_pos];
+  }
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -337,7 +353,8 @@ struct BigHeap {
 
   std::vector<BigNode*> getBigs();
 
-  void dump();
+  void setMapBit(void* p, bool overflow);
+  void dumpMapBits();
 
   // allocate a MemBlock of at least size bytes, track in m_slabs.
   MemBlock allocSlab(size_t size, bool forOverflow);

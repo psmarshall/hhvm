@@ -27,7 +27,7 @@
 #include <folly/Range.h>
 
 namespace HPHP {
-TRACE_SET_MOD(heaptrace);
+TRACE_SET_MOD(mm);
 using HK = HeaderKind;
 
 namespace {
@@ -65,12 +65,11 @@ struct PtrMap {
     return h && h == p;
   }
   // copy in all allocations from the memory manager and sort
-  void prepare(std::vector<std::pair<Header*, std::size_t>> allocs,
-               std::vector<BigNode*> bigs) {
+  void prepare(const std::vector<std::pair<Header*, std::size_t>>& allocs,
+               const std::vector<BigNode*>& bigs) {
     assert(!sorted_);
     regions_ = allocs;
-    for (auto& big : bigs) {
-      TRACE_SET_MOD(mm);
+    for (const auto& big : bigs) {
       auto hb = reinterpret_cast<Header*>(big);
       auto h = reinterpret_cast<Header*>((&hb->big_)+1);
       FTRACE(2, "prepare saw big: {} {}\n", h, h->size());
@@ -88,7 +87,6 @@ private:
       if (!last || last <= region.first) {
         last = (void*)(uintptr_t(region.first) + region.second);
       } else {
-        TRACE_SET_MOD(mm);
         FTRACE(1, "sanityCheck: last:{} region ptr: {}, region size:{}\n",
           last, region.first, region.second);
         return false;
@@ -533,10 +531,9 @@ void Marker::trace(const std::vector<std::pair<Header*, std::size_t>>& allocs) {
     auto h = pair.first;
     if (h->kind() == HK::SmallMalloc) {
       // mark line
-      TRACE_SET_MOD(mm);
-      TRACE(2, "Marking line for SmallMalloc at %p\n", h);
+      TRACE(3, "Marking line for SmallMalloc at %p\n", h);
       if (h->size() > kLineSize) {
-        TRACE(2, "Marking multiple lines for SmallMalloc at %p\n", h);
+        TRACE(3, "Marking multiple lines for SmallMalloc at %p\n", h);
         MM().markLinesForMedium(h, h->size());
       } else {
         MM().markLineForSmall(h);
@@ -600,73 +597,72 @@ DEBUG_ONLY bool check_sweep_header(const Header* h) {
 void Marker::sweep(std::vector<std::pair<Header*, std::size_t>>& allocs) {
   Counter marked, ambig, freed;
   std::vector<Header*> reaped;
-  auto allocs_before = allocs.size();
-  auto allocs_removed = 0;
+  std::vector<std::pair<Header*, std::size_t>> survivors;
 
   auto& mm = MM();
 
   // remove pointers to all dead objects from our vector
-  allocs.erase(
-    std::remove_if(
-      allocs.begin(),
-      allocs.end(),
-      [&](const std::pair<Header*, std::size_t>& pair) {
-        auto h = pair.first;
-        if (h->hdr_.mark) {
-          // mark our line
-          if (h->size() <= kLineSize) {
-            mm.markLineForSmall(h);
-          } else if (h->size() <= kMaxMediumSize) {
-            mm.markLinesForMedium(h, h->size());
-          }
-          return false; // object lives, don't do anything to it
-        }
-        allocs_removed++;
-        // object dies
-        switch (h->kind()) {
-          case HK::Packed:
-          case HK::Struct:
-          case HK::Mixed:
-          case HK::Empty:
-          case HK::Globals:
-          case HK::Proxy:
-          case HK::Resource:
-          case HK::Ref:
-          case HK::Object:
-          case HK::AwaitAllWH:
-          case HK::Vector:
-          case HK::Map:
-          case HK::Set:
-          case HK::Pair:
-          case HK::ImmVector:
-          case HK::ImmMap:
-          case HK::ImmSet:
-          case HK::ResumableFrame:
-          case HK::NativeData:
-          case HK::Apc:
-          case HK::String:
-            freed += h->size();
-            reaped.push_back(h);
-            break;
-          case HK::SmallMalloc:
-          case HK::BigMalloc:
-            // Don't free malloc-ed allocations even if they're not reachable.
-            break;
-          case HK::Free:
-            break;
-          case HK::Hole:
-          case HK::BigObj:
-          case HK::ResumableObj:
-            assert(false && "get outta here");
-            break;
-        }
-        return true; // remove from m_heap_allocations
+  for (const auto& pair : allocs) {
+    auto h = pair.first;
+    if (h->hdr_.mark) {
+      // mark our line
+      if (h->size() <= kLineSize) {
+        mm.markLineForSmall(h);
+      } else if (h->size() <= kMaxMediumSize) {
+        mm.markLinesForMedium(h, h->size());
       }
-    ),
-    allocs.end()
-  );
+      survivors.push_back(pair); // object lives, don't do anything to it
+      continue;
+    }
+    // object dies
+    switch (h->kind()) {
+      case HK::Apc:
+      case HK::String:
+      case HK::Object:
+      case HK::ResumableFrame:
+      case HK::NativeData:
+        freed += h->size();
+        reaped.push_back(h);
+        break;
+      case HK::Packed:
+      case HK::Struct:
+      case HK::Mixed:
+      case HK::Empty:
+      case HK::Globals:
+      case HK::Proxy:
+      case HK::Resource:
+      case HK::Ref:
+      case HK::AwaitAllWH:
+      case HK::Vector:
+      case HK::Map:
+      case HK::Set:
+      case HK::Pair:
+      case HK::ImmVector:
+      case HK::ImmMap:
+      case HK::ImmSet:
+        freed += h->size();
+        break;
+      case HK::SmallMalloc:
+        // These aren't marked, but we marked their lines earlier.
+        break;
+      case HK::BigMalloc:
+        assert(false && "BigMalloc shouldn't be in Immix heap");
+        break;
+      case HK::Free:
+        assert(false && "Free shouldn't be in Immix heap");
+        break;
+      case HK::Hole:
+      case HK::BigObj:
+      case HK::ResumableObj:
+        assert(false && "get outta here");
+        break;
+    }
+  }
+  
+  FTRACE(2, "allocations before sweep: {}, removed: {}, remaining: {}\n",
+    allocs.size(), allocs.size() - survivors.size(), survivors.size());
 
-  assert(allocs.size() == allocs_before - allocs_removed);
+  allocs = survivors;
 
   // It's safe to free unreachable objects.
   // None of these actually *free* anything but they may run
@@ -681,26 +677,33 @@ void Marker::sweep(std::vector<std::pair<Header*, std::size_t>>& allocs) {
         g_context->dynPropTable.erase(obj);
       }
       // mm.objFree(h, h->size());
-    } else {
-      // mm.objFree(h, h->size());
     }
   }
 
   // immix free lines
   if (debug) {
+    uint32_t kept = 0, total = 0, implicit = 0;
     uint8_t prevMarkByte = 0; // deals with implicit marking
     mm.forEachLine([&](void* line, uint8_t& markByte) {
-      if (markByte == 0 && prevMarkByte == 0) {
-        TRACE(3, "line freed %p", line);
-        // doesn't matter we are putting trash in the heap
-        // because it doesn't need to be parseable
-        memset(line, kSmallFreeFill, kLineSize);
+      total++;
+      if (markByte == 0) {
+        if (prevMarkByte == 0) {
+          TRACE(4, "line freed %p\n", line);
+          // doesn't matter we are putting trash in the heap
+          // because it doesn't need to be parseable
+          memset(line, kSmallFreeFill, kLineSize);
+        } else {
+          implicit++;
+        }
       } else {
-        FTRACE(3, "line kept {}, markByte: {}, prevMarkByte: {}\n",
+        FTRACE(4, "line kept {}, markByte: {}, prevMarkByte: {}\n",
           line, markByte, prevMarkByte);
+        kept++;
       }
       prevMarkByte = markByte;
     });
+    FTRACE(2, "#lines at sweep: {}, marked: {}, implicitly marked: {}, wiped: {}\n",
+      total, kept, implicit, total - kept);
   }
 
   mm.freeUnusedBlocks();
@@ -717,12 +720,10 @@ void Marker::sweep(std::vector<std::pair<Header*, std::size_t>>& allocs) {
 }
 
 void MemoryManager::collect() {
-  TRACE_SET_MOD(mm);
   TRACE(1, "MemoryManager::collect() called\n");
   if (!RuntimeOption::EvalEnableGC || empty()) return;
 
-  m_heap.dump();
-  
+  m_heap.dumpMapBits();
   Marker mkr;
   mkr.init(m_heap_allocations, m_heap.getBigs());
   mkr.trace(m_heap_allocations);

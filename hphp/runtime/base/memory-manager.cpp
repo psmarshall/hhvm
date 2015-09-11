@@ -20,6 +20,7 @@
 #include <limits>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <sstream>
 
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/exceptions.h"
@@ -741,7 +742,6 @@ void* MemoryManager::sequentialAllocate(void*& cursor, void* limit,
     // the other assertions imply p is aligned here
     TRACE(3, "sequentialAllocate fit %d bytes in %lu space\n", aligned_bytes,
       space);
-
     // All allocation happens here
     m_heap_allocations.emplace_back((Header*)p, aligned_bytes);
     return p;
@@ -876,6 +876,7 @@ void* MemoryManager::overflowAlloc(uint32_t bytes) {
 
   void* p = sequentialAllocate(m_blockCursor, m_blockLimit, bytes);
   if (p != nullptr) {
+    m_heap.setMapBit(p, /*overflow*/ true);
     FTRACE(2, "overflowAlloc into block: {} -> {}\n", bytes, p);
     return p;
   }
@@ -886,6 +887,7 @@ void* MemoryManager::overflowAlloc(uint32_t bytes) {
     return nullptr; //OOM
   }
   auto ret = sequentialAllocate(m_blockCursor, m_blockLimit, bytes);
+  m_heap.setMapBit(ret, /*overflow*/ true);
   FTRACE(2, "overflowAlloc into *new* block: {} -> {}\n", bytes, ret);
   return ret;
 }
@@ -1133,29 +1135,37 @@ void BigHeap::reset() {
   m_bigs.clear();
 }
 
-void BigHeap::dump() {
-  // TRACE(2, "BigHeap dump:\n\n");
-  // auto charCounter = 0, blockCounter = 0;
-  // MM().forEachHeader([&](Header* h) {
-  //   auto size = MemoryManager::align(h->size());
-  //   for (uintptr_t p = uintptr_t(h); p < uintptr_t(h) + size; p += 16) {
-  //     if (charCounter == 64) {
-  //       TRACE(2, "\n");
-  //       charCounter = 0;
-  //     }
-  //     if (blockCounter == 2048) {
-  //       TRACE(2, "\n");
-  //       blockCounter = 0;
-  //     }
-  //     if (h->kind() == HeaderKind::Hole) {
-  //       TRACE(2, "-");
-  //     } else {
-  //       TRACE(2, "x");
-  //     }
-  //     charCounter++;
-  //     blockCounter++;
-  //   }
-  // });
+/*
+ * Notify the heap that something has been allocated at address p
+ * so that it can update its live map to record that there is a valid
+ * header at p.
+ */
+void BigHeap::setMapBit(void* p, bool overflow) {
+  if (overflow) {
+    // iterate over all blocks because reasons
+    for (auto& slab : m_slabs) {
+      auto block_ptr = uintptr_t(slab.ptr);
+      if (uintptr_t(p) >= block_ptr &&
+          uintptr_t(p) <  block_ptr + slab.size) {
+        slab.setMapBit(p);
+        return;
+      }
+    }
+    assert(false && "couldn't find block for overflow setMapBit");
+  }
+  assert(m_pos != -1);
+  assert(m_pos < m_slabs.size());
+  m_slabs[m_pos].setMapBit(p);
+}
+
+void BigHeap::dumpMapBits() {
+  FTRACE(3, "dumpMapBits():\n");
+  for (auto& slab : m_slabs) {
+    std::stringstream ss;
+    ss << slab.map;
+    FTRACE(3, "slab: {}\n", slab.ptr);
+    FTRACE(3, "{}\n", ss.str());
+  }
 }
 
 void BigHeap::flush() {

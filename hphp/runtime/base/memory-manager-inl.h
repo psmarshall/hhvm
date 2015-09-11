@@ -181,6 +181,7 @@ inline void* MemoryManager::mallocSmallSize(uint32_t bytes) {
   void* p = sequentialAllocate(m_lineCursor, m_lineLimit, bytes);
   if (LIKELY(p != nullptr)) {
     FTRACE(3, "mallocSmallSize: {} -> {}\n", bytes, p);
+    m_heap.setMapBit(p, /*overflow*/ false);
     return p;
   }
   if (bytes <= kLineSize) {
