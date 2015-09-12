@@ -724,6 +724,16 @@ void MemoryManager::collect() {
   if (!RuntimeOption::EvalEnableGC || empty()) return;
 
   m_heap.dumpMapBits();
+
+  for (const auto& pair : m_heap_allocations) {
+    bool alive = m_heap.testMapBit(pair.first);
+    if (!alive) {
+      TRACE(2, "!! heap_ptr={}\n", pair.first);
+    }
+    assert(alive);
+  }
+
+
   Marker mkr;
   mkr.init(m_heap_allocations, m_heap.getBigs());
   mkr.trace(m_heap_allocations);

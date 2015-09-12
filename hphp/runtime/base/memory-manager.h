@@ -354,6 +354,7 @@ struct BigHeap {
   std::vector<BigNode*> getBigs();
 
   void setMapBit(void* p, bool overflow);
+  bool testMapBit(void* p);
   void dumpMapBits();
 
   // allocate a MemBlock of at least size bytes, track in m_slabs.

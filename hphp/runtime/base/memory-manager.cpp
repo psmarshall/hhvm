@@ -1153,12 +1153,28 @@ void BigHeap::setMapBit(void* p, bool overflow) {
         return;
       }
     }
-    FTRACE(2, "!! couldn't find slab in setMapBit(overflow) : {}\n", m_slabs.empty());
+    FTRACE(2, "!! couldn't find block in setMapBit(overflow) p={}\n", p);
     return;
   }
   assert(m_pos != -1);
   assert(m_pos < m_slabs.size());
   m_slabs[m_pos].setMapBit(p);
+}
+
+/*
+ * Check if the heap has a live object registered at address p.
+ */
+bool BigHeap::testMapBit(void* p) {
+  // could probably do this faster with a binary search for the
+  // block through a sorted vector instead
+  for (auto& slab : m_slabs) {
+    auto block_ptr = uintptr_t(slab.ptr);
+    if (uintptr_t(p) >= block_ptr &&
+        uintptr_t(p) <  block_ptr + slab.size) {
+      return slab.testMapBit(p);
+    }
+  }
+  FTRACE(2, "!! couldn't find block in testMapBit p={}\n", p);
 }
 
 void BigHeap::dumpMapBits() {
