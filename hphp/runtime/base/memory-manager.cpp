@@ -1143,15 +1143,18 @@ void BigHeap::reset() {
 void BigHeap::setMapBit(void* p, bool overflow) {
   if (overflow) {
     // iterate over all blocks because reasons
+    FTRACE(2, "slabs empty on setMapBit (overflow) : {}\n", m_slabs.empty());
     for (auto& slab : m_slabs) {
       auto block_ptr = uintptr_t(slab.ptr);
+      FTRACE(2, "setMapBit(overflow): p={}, slab.ptr={}\n", p, slab.ptr);
       if (uintptr_t(p) >= block_ptr &&
           uintptr_t(p) <  block_ptr + slab.size) {
         slab.setMapBit(p);
         return;
       }
     }
-    assert(false && "couldn't find block for overflow setMapBit");
+    FTRACE(2, "!! couldn't find slab in setMapBit(overflow) : {}\n", m_slabs.empty());
+    return;
   }
   assert(m_pos != -1);
   assert(m_pos < m_slabs.size());
