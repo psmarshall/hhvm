@@ -477,7 +477,7 @@ struct MemoryManager {
   // Allocation.
 
   static uint32_t align(uint32_t bytes);
-  static void* align(void* p);
+  static void* align(const void* p);
 
   /*
    * Return a lower bound estimate of the capacity that will be returned for

@@ -669,7 +669,6 @@ void MemoryManager::checkHeap() {
   });
 
   iterate([&](Header* h) {
-    auto h = pair.first;
     switch (h->kind()) {
       case HeaderKind::Apc:
         apc_arrays.insert(&h->apc_);

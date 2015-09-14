@@ -153,7 +153,7 @@ inline uint32_t MemoryManager::align(uint32_t bytes) {
   return aligned_bytes;
 }
 
-inline void* MemoryManager::align(void* p) {
+inline void* MemoryManager::align(const void* p) {
   uint64_t mask = (uint64_t)kSmallSizeAlignMask;
   // round to 16-byte alignment
   auto aligned_uint_p = (uintptr_t(p) + mask) & ~(mask);
