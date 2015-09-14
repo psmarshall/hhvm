@@ -169,47 +169,34 @@ inline size_t Header::size() const {
 
 // Iterate over all the slabs and bigs
 template<class Fn> void BigHeap::iterate(Fn fn) {
-  auto in_slabs = !m_slabs.empty();
-  auto slab = begin(m_slabs);
-  auto big = begin(m_bigs);
-  Header *hdr, *slab_end;
-  if (in_slabs) {
-    hdr = (Header*)slab->ptr;
-    slab_end = (Header*)(static_cast<char*>(slab->ptr) + slab->size);
-  } else {
-    hdr = big != end(m_bigs) ? (Header*)*big : nullptr;
-    slab_end = nullptr;
-  }
-  while (in_slabs || big != end(m_bigs)) {
-    auto h = hdr;
-    if (in_slabs) {
-      // move to next header in slab. Hole and Free have exact sizes,
-      // so don't round them.
-      auto size = hdr->hdr_.kind == HeaderKind::Hole ||
-                  hdr->hdr_.kind == HeaderKind::Free ? hdr->free_.size() :
-                  hdr->size();
-      assert(size > 0 && "size=0 causes infinite loop");
-      // does this make sense ?
-      // size can sometimes not be aligned
-      size = MemoryManager::align(size);
-      hdr = (Header*)((char*)hdr + size);
-      if (hdr >= slab_end) {
-        assert(hdr == slab_end && "hdr > slab_end indicates corruption");
-        // move to next slab
-        if (++slab != m_slabs.end()) {
-          hdr = (Header*)slab->ptr;
-          slab_end = (Header*)(static_cast<char*>(slab->ptr) + slab->size);
-        } else {
-          // move to first big block
-          in_slabs = false;
-          if (big != end(m_bigs)) hdr = (Header*)*big;
-        }
+  for (auto& slab: m_slabs) {
+    auto block_ptr = uintptr_t(slab.ptr);
+    for (auto i = 0; i < slab.map.size(); i++) {
+      if (slab.map[i]) {
+        auto h = (Header*)(block_ptr + (i * 16));
+        assert(uintptr_t(h) >= block_ptr &&
+          uintptr_t(h) < block_ptr + slab.size);
+        fn(h);
       }
-    } else {
-      // move to next big block
-      if (++big != end(m_bigs)) hdr = (Header*)*big;
     }
-    fn(h);
+  }
+
+  for (auto* big: m_bigs) {
+    fn((Header*)big);
+  }
+}
+
+template<class Fn> void BigHeap::iterateSlabs(Fn fn) {
+  for (auto& slab: m_slabs) {
+    auto block_ptr = uintptr_t(slab.ptr);
+    for (auto i = 0; i < slab.map.size(); i++) {
+      if (slab.map[i]) {
+        auto h = (Header*)(block_ptr + (i * 16));
+        assert(uintptr_t(h) >= block_ptr &&
+          uintptr_t(h) < block_ptr + slab.size);
+        fn(h, slab.map[i]);
+      }
+    }
   }
 }
 
@@ -230,12 +217,20 @@ template<class Fn> void MemoryManager::iterate(Fn fn) {
   m_heap.iterate([&](Header* h) {
     if (h->kind() == HeaderKind::BigObj) {
       // skip BigNode
+      FTRACE(2, "Skipping bignode in mm::iterate() at {}\n", h);
       h = reinterpret_cast<Header*>((&h->big_)+1);
     } else if (h->kind() == HeaderKind::Hole) {
       // no valid pointer can point here.
+      FTRACE(2, "!! Hole found in mm::iterate() at {}\n", h);
       return; // continue iterating
     }
     fn(h);
+  });
+}
+
+template<class Fn> void MemoryManager::iterateSlabs(Fn fn) {
+  m_heap.iterateSlabs([&](Header* h, live_map::reference live) {
+    fn(h, live);
   });
 }
 
@@ -245,59 +240,10 @@ template<class Fn> void MemoryManager::forEachLine(Fn fn) {
   });
 }
 
-// same as iterate()
-template<class Fn> void MemoryManager::forEachHeader(Fn fn) {
-  iterate(fn);
-}
-
 // iterate just the ObjectDatas, including the kinds with prefixes.
 // (NativeData and ResumableFrame).
 template<class Fn> void MemoryManager::forEachObject(Fn fn) {
   if (debug) checkHeap();
-  std::vector<ObjectData*> ptrs;
-  forEachHeader([&](Header* h) {
-    switch (h->kind()) {
-      case HeaderKind::Object:
-      case HeaderKind::ResumableObj:
-      case HeaderKind::AwaitAllWH:
-      case HeaderKind::Vector:
-      case HeaderKind::Map:
-      case HeaderKind::Set:
-      case HeaderKind::Pair:
-      case HeaderKind::ImmVector:
-      case HeaderKind::ImmMap:
-      case HeaderKind::ImmSet:
-        ptrs.push_back(&h->obj_);
-        break;
-      case HeaderKind::ResumableFrame:
-        ptrs.push_back(h->resumableObj());
-        break;
-      case HeaderKind::NativeData:
-        ptrs.push_back(h->nativeObj());
-        break;
-      case HeaderKind::Packed:
-      case HeaderKind::Struct:
-      case HeaderKind::Mixed:
-      case HeaderKind::Empty:
-      case HeaderKind::Apc:
-      case HeaderKind::Globals:
-      case HeaderKind::Proxy:
-      case HeaderKind::String:
-      case HeaderKind::Resource:
-      case HeaderKind::Ref:
-      case HeaderKind::SmallMalloc:
-      case HeaderKind::BigMalloc:
-      case HeaderKind::Free:
-        break;
-      case HeaderKind::BigObj:
-      case HeaderKind::Hole:
-        assert(false && "forEachHeader skips these kinds");
-        break;
-    }
-  });
-  for (auto ptr : ptrs) {
-    fn(ptr);
-  }
 }
 
 }

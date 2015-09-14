@@ -22,6 +22,14 @@
 #include <unistd.h>
 #include <sstream>
 
+// TODO Killme
+#include <stdio.h>
+#include <execinfo.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include "hphp/util/stack-trace.h"
+
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/exceptions.h"
 #include "hphp/runtime/base/memory-profile.h"
@@ -723,6 +731,25 @@ void MemoryManager::checkHeap() {
     markedLines);
 }
 
+void handler(int sig) {
+  void *array[10];
+  size_t size;
+
+  // get void*'s for all entries on the stack
+  size = backtrace(array, 10);
+
+  // print out all the frames to stderr
+  fprintf(stderr, "Error: signal %d:\n", sig);
+  backtrace_symbols_fd(array, size, STDERR_FILENO);
+
+  StackTraceNoHeap st;
+  st.log("segv", STDERR_FILENO, "debug", 666);
+
+
+  exit(1);
+}
+
+
 void* MemoryManager::sequentialAllocate(void*& cursor, void* limit, 
                                         uint32_t bytes) {
   assert((uintptr_t(cursor) & kSmallSizeAlignMask) == 0);
@@ -749,6 +776,9 @@ void* MemoryManager::sequentialAllocate(void*& cursor, void* limit,
   
   TRACE(2, "sequentialAllocate could not fit %d bytes in %lu space\n", bytes,
     space);
+
+  // signal(SIGSEGV, handler);   // install our handler
+
   return nullptr;
 }
 
@@ -876,7 +906,7 @@ void* MemoryManager::overflowAlloc(uint32_t bytes) {
 
   void* p = sequentialAllocate(m_blockCursor, m_blockLimit, bytes);
   if (p != nullptr) {
-    m_heap.setMapBit(p, /*overflow*/ true);
+    m_heap.setMapBitSlow(p);
     FTRACE(2, "overflowAlloc into block: {} -> {}\n", bytes, p);
     return p;
   }
@@ -887,7 +917,7 @@ void* MemoryManager::overflowAlloc(uint32_t bytes) {
     return nullptr; //OOM
   }
   auto ret = sequentialAllocate(m_blockCursor, m_blockLimit, bytes);
-  m_heap.setMapBit(ret, /*overflow*/ true);
+  m_heap.setMapBitSlow(ret);
   FTRACE(2, "overflowAlloc into *new* block: {} -> {}\n", bytes, ret);
   return ret;
 }
@@ -1138,33 +1168,36 @@ void BigHeap::reset() {
 /*
  * Notify the heap that something has been allocated at address p
  * so that it can update its live map to record that there is a valid
- * header at p.
+ * header at p. p must be in the slab at m_pos - this is a fast path
+ * to use for normal allocations (non-overflow allocations)
  */
-void BigHeap::setMapBit(void* p, bool overflow) {
-  if (overflow) {
-    // iterate over all blocks because reasons
-    FTRACE(2, "slabs empty on setMapBit (overflow) : {}\n", m_slabs.empty());
-    for (auto& slab : m_slabs) {
-      auto block_ptr = uintptr_t(slab.ptr);
-      FTRACE(2, "setMapBit(overflow): p={}, slab.ptr={}\n", p, slab.ptr);
-      if (uintptr_t(p) >= block_ptr &&
-          uintptr_t(p) <  block_ptr + slab.size) {
-        slab.setMapBit(p);
-        return;
-      }
-    }
-    FTRACE(2, "!! couldn't find block in setMapBit(overflow) p={}\n", p);
-    return;
-  }
+void BigHeap::setMapBit(const void* p) {
   assert(m_pos != -1);
   assert(m_pos < m_slabs.size());
   m_slabs[m_pos].setMapBit(p);
 }
 
+/* 
+ * Same as above, but will find the correct block for p first.
+ * Use when updating map from collector or on overflowAlloc slow
+ * path.
+ */
+void BigHeap::setMapBitSlow(const void* p) {
+  for (auto& slab : m_slabs) {
+    auto block_ptr = uintptr_t(slab.ptr);
+    if (uintptr_t(p) >= block_ptr &&
+        uintptr_t(p) <  block_ptr + slab.size) {
+      slab.setMapBit(p);
+      return;
+    }
+  }
+  FTRACE(2, "!! couldn't find block in setMapBitSlow p={}\n", p);
+}
+
 /*
  * Check if the heap has a live object registered at address p.
  */
-bool BigHeap::testMapBit(void* p) {
+bool BigHeap::testMapBit(const void* p) {
   // could probably do this faster with a binary search for the
   // block through a sorted vector instead
   for (auto& slab : m_slabs) {
@@ -1175,6 +1208,13 @@ bool BigHeap::testMapBit(void* p) {
     }
   }
   FTRACE(2, "!! couldn't find block in testMapBit p={}\n", p);
+  return false;
+}
+
+void BigHeap::resetMapBits() {
+  for (auto& slab : m_slabs) {
+    slab.map.reset();
+  }
 }
 
 void BigHeap::dumpMapBits() {
@@ -1254,6 +1294,15 @@ bool BigHeap::contains(void* ptr) const {
     }
   );
   return it != std::end(m_slabs);
+}
+
+bool BigHeap::containsBig(const void* ptr) const {
+  auto it = std::find_if(std::begin(m_bigs), std::end(m_bigs),
+    [&] (BigNode* big) {
+      return (reinterpret_cast<const BigNode*>(ptr)) - 1 == big;
+    }
+  );
+  return it != std::end(m_bigs);
 }
 
 void BigHeap::markLineForSmall(const void* p) {

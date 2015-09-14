@@ -32,73 +32,6 @@ using HK = HeaderKind;
 
 namespace {
 
-// information about heap objects, indexed by valid object starts.
-struct PtrMap {
-  // void insert(Header* h) {
-  //   assert(!sorted_);
-  //   regions_.emplace_back(h, h->size());
-  // }
-  Header* header(const void* p) const {
-    assert(sorted_);
-    // Find the first region which begins beyond p.
-    auto it =
-      std::upper_bound(
-        regions_.begin(),
-        regions_.end(),
-        p,
-        [](const void* p,
-           const std::pair<Header*, std::size_t>& region) {
-          return p < region.first;
-        }
-      );
-    // If its the first region, p is before any region, so there's no
-    // header. Otherwise, backup to the previous region.
-    if (it == regions_.begin()) return nullptr;
-    --it;
-    
-    // p can only potentially point within this previous region, so check that.
-    return (uintptr_t(p) < uintptr_t(it->first) + it->second) ?
-      it->first : nullptr;
-  }
-  bool isHeader(const void* p) const {
-    auto h = header(p);
-    return h && h == p;
-  }
-  // copy in all allocations from the memory manager and sort
-  void prepare(const std::vector<std::pair<Header*, std::size_t>>& allocs,
-               const std::vector<BigNode*>& bigs) {
-    assert(!sorted_);
-    regions_ = allocs;
-    for (const auto& big : bigs) {
-      auto hb = reinterpret_cast<Header*>(big);
-      auto h = reinterpret_cast<Header*>((&hb->big_)+1);
-      FTRACE(2, "prepare saw big: {} {}\n", h, h->size());
-      regions_.emplace_back(h, h->size());
-    }
-    std::sort(regions_.begin(), regions_.end());
-    assert(sanityCheck());
-    sorted_ = true;
-  }
-private:
-  bool sanityCheck() const {
-    // Verify that all the regions are in increasing and non-overlapping order.
-    void* last = nullptr;
-    for (const auto& region : regions_) {
-      if (!last || last <= region.first) {
-        last = (void*)(uintptr_t(region.first) + region.second);
-      } else {
-        FTRACE(1, "sanityCheck: last:{} region ptr: {}, region size:{}\n",
-          last, region.first, region.second);
-        return false;
-      }
-    }
-    return true;
-  }
-
-  std::vector<std::pair<Header*, std::size_t>> regions_;
-  bool sorted_ = false;
-};
-
 struct Counter {
   size_t count{0};
   size_t bytes{0};
@@ -109,10 +42,9 @@ struct Counter {
 };
 
 struct Marker {
-  explicit Marker() {}
-  void init(const std::vector<std::pair<Header*, std::size_t>>& allocs,
-            std::vector<BigNode*> bigs);
-  void trace(const std::vector<std::pair<Header*, std::size_t>>& allocs);
+  explicit Marker(BigHeap* heap) : heap(heap) {}
+  void init();
+  void trace();
   void sweep(std::vector<std::pair<Header*, std::size_t>>& allocs);
 
   // mark exact pointers
@@ -209,7 +141,7 @@ private:
   }
 
 private:
-  PtrMap ptrs_;
+  BigHeap* heap;
   std::vector<const Header*> work_;
   folly::Range<const char*> rds_; // full mmap'd rds section.
   Counter total_;        // bytes allocated in heap
@@ -217,7 +149,7 @@ private:
 
 // mark the object at p, return true if first time.
 bool Marker::mark(const void* p) {
-  assert(p && ptrs_.isHeader(p));
+  assert(p && (heap->containsBig(p) || heap->testMapBit(p)));
   auto h = static_cast<const Header*>(p);
   assert(h->kind() <= HK::BigMalloc && h->kind() != HK::ResumableObj);
   auto first = !h->hdr_.mark;
@@ -252,6 +184,7 @@ void Marker::operator()(const ObjectData* p) {
                  r->actRec()->func()->numSlotsInFrame();
     auto node = reinterpret_cast<const ResumableNode*>(frame) - 1;
     assert(node->hdr.kind == HK::ResumableFrame);
+    FTRACE(2, "!! mark resumable at {}, node={}\n", p, node);
     if (mark(node)) {
       // mark the ResumableFrame prefix, but enqueue the ObjectData* to scan
       enqueue(p);
@@ -361,8 +294,15 @@ Marker::operator()(const void* start, size_t len) {
   auto e = (char**)((uintptr_t(start) + len) & ~M); // round down
   for (; s < e; s++) {
     auto p = *s;
-    auto h = ptrs_.header(p);
-    if (!h) continue;
+    if (MemoryManager::align(p) != p) {
+      TRACE(2, "!! Skipping non-aligned ambiguous ptr %p\n", p);
+      continue;
+    }
+    auto real = heap->containsBig(p) || (heap->contains(p) && heap->testMapBit(p));
+    if (!real) {
+      continue;
+    }
+    auto h = (Header*)p;
     // mark p if it's an interesting kind. since we have metadata for it,
     // it must have a valid header.
     h->hdr_.cmark = true;
@@ -422,15 +362,11 @@ Marker::operator()(const void* start, size_t len) {
 // * StringData owned by StringBuffer
 // * ArrayData owned by ArrayInit
 // * Object ctors allocating memory in ctor (while count still==0).
-void Marker::init(const std::vector<std::pair<Header*, std::size_t>>& allocs,
-                  std::vector<BigNode*> bigs) {
+void Marker::init() {
   rds_ = folly::Range<const char*>((char*)rds::header(),
                                    RuntimeOption::EvalJitTargetCacheSize);
 
-  // do size accounting and clear mark bits for each header in the heap (no bigs)
-  for (auto& pair : allocs) {
-    auto h = pair.first;
-    // OK even for bigObj and Hole
+  MM().iterate([&](Header* h) {
     h->hdr_.mark = h->hdr_.cmark = false;
     switch (h->kind()) {
       case HK::Apc:
@@ -476,6 +412,7 @@ void Marker::init(const std::vector<std::pair<Header*, std::size_t>>& allocs,
         total_ += h->size();
         auto obj = reinterpret_cast<const Header*>(h->resumableObj());
         obj->hdr_.mark = obj->hdr_.cmark = false;
+        FTRACE(2, "Resumable frame in init: h={}, obj={}\n", h, obj);
         break;
       }
       case HK::NativeData: {
@@ -487,10 +424,8 @@ void Marker::init(const std::vector<std::pair<Header*, std::size_t>>& allocs,
         break;
       }
       case HK::SmallMalloc:
-        total_ += h->size();
-        break;
       case HK::BigMalloc:
-        assert(false && "Get outta here");
+        total_ += h->size();
         break;
       case HK::Free:
         break;
@@ -500,14 +435,11 @@ void Marker::init(const std::vector<std::pair<Header*, std::size_t>>& allocs,
         assert(false && "Get outta here");
         break;
       case HK::Hole:
-        break; // freed by freeSmallSize()
       case HK::BigObj:
-        assert(false && "Should be no BigObj in heap");
+        assert(false && "Get outta here");
         break;
     }
-  }
-  // hand over details of all allocations
-  ptrs_.prepare(allocs, bigs);
+  });
 
   //clear marks for immix lines
   MM().forEachLine([&](void* line, uint8_t& markByte) {
@@ -515,7 +447,7 @@ void Marker::init(const std::vector<std::pair<Header*, std::size_t>>& allocs,
   });
 }
 
-void Marker::trace(const std::vector<std::pair<Header*, std::size_t>>& allocs) {
+void Marker::trace() {
   scanRoots(*this);
   while (!work_.empty()) {
     auto h = work_.back();
@@ -527,8 +459,8 @@ void Marker::trace(const std::vector<std::pair<Header*, std::size_t>>& allocs) {
   // We don't need to do this for BigMalloc header because they
   // aren't stored in immix lines/blocks, so they won't be
   // accidentally freed
-  for (auto& pair : allocs) {
-    auto h = pair.first;
+  // Use iterateSlabs because it ignores bigs, it will be faster
+  MM().iterateSlabs([&](Header* h, const live_map::reference live) {
     if (h->kind() == HK::SmallMalloc) {
       // mark line
       TRACE(3, "Marking line for SmallMalloc at %p\n", h);
@@ -539,7 +471,7 @@ void Marker::trace(const std::vector<std::pair<Header*, std::size_t>>& allocs) {
         MM().markLineForSmall(h);
       }
     }
-  }
+  });
 }
 
 // check that headers have a "sensible" state during sweeping.
@@ -601,9 +533,10 @@ void Marker::sweep(std::vector<std::pair<Header*, std::size_t>>& allocs) {
 
   auto& mm = MM();
 
-  // remove pointers to all dead objects from our vector
-  for (const auto& pair : allocs) {
-    auto h = pair.first;
+  //TODO this doesn't free bigs, should be OK?
+
+  // recreate live-map using mark info
+  mm.iterateSlabs([&](Header* h, live_map::reference live) {
     if (h->hdr_.mark) {
       // mark our line
       if (h->size() <= kLineSize) {
@@ -611,10 +544,12 @@ void Marker::sweep(std::vector<std::pair<Header*, std::size_t>>& allocs) {
       } else if (h->size() <= kMaxMediumSize) {
         mm.markLinesForMedium(h, h->size());
       }
-      survivors.push_back(pair); // object lives, don't do anything to it
-      continue;
+      // live bit is true, don't need to change it
+      survivors.emplace_back(h, h->size()); // object lives, don't do anything to it
+      return;
     }
     // object dies
+    live = false; // flick off our live bit
     switch (h->kind()) {
       case HK::Apc:
       case HK::String:
@@ -643,10 +578,10 @@ void Marker::sweep(std::vector<std::pair<Header*, std::size_t>>& allocs) {
         freed += h->size();
         break;
       case HK::SmallMalloc:
-        // These aren't marked, but we marked their lines earlier.
+        live = true; // need to keep these live 
         break;
       case HK::BigMalloc:
-        assert(false && "BigMalloc shouldn't be in Immix heap");
+        // Don't free malloc-ed allocations even if they're not reachable.
         break;
       case HK::Free:
         assert(false && "Free shouldn't be in Immix heap");
@@ -657,17 +592,30 @@ void Marker::sweep(std::vector<std::pair<Header*, std::size_t>>& allocs) {
         assert(false && "get outta here");
         break;
     }
-  }
+  });
   
   FTRACE(2, "allocations before sweep: {}, removed: {}, remaining: {}\n",
     allocs.size(), allocs.size() - survivors.size(), survivors.size());
 
   allocs = survivors;
 
+  for (const auto& pair : survivors) {
+    bool alive = heap->testMapBit(pair.first);
+    if (!alive) {
+      FTRACE(2, "!! survivor not marked in live-map ptr={}\n", pair.first);
+    }
+    assert(alive);
+  }
+
   // It's safe to free unreachable objects.
   // None of these actually *free* anything but they may run
   // finalization logic
   for (auto h : reaped) {
+    bool alive = heap->testMapBit(h);
+    if (alive) {
+      FTRACE(2, "!! dead thing marked in live-map ptr={}\n", h);
+    }
+    assert(!alive);
     if (h->kind() == HK::Apc) {
       h->apc_.reap(); // calls smart_free() and smartFreeSize()
     } else if (h->kind() == HK::String) {
@@ -728,17 +676,15 @@ void MemoryManager::collect() {
   for (const auto& pair : m_heap_allocations) {
     bool alive = m_heap.testMapBit(pair.first);
     if (!alive) {
-      TRACE(2, "!! heap_ptr={}\n", pair.first);
+      FTRACE(2, "!! heap_ptr={}\n", pair.first);
     }
     assert(alive);
   }
 
-
-  Marker mkr;
-  mkr.init(m_heap_allocations, m_heap.getBigs());
-  mkr.trace(m_heap_allocations);
+  Marker mkr(&m_heap);
+  mkr.init();
+  mkr.trace();
   mkr.sweep(m_heap_allocations);
-
 }
 
 }

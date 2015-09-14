@@ -153,6 +153,15 @@ inline uint32_t MemoryManager::align(uint32_t bytes) {
   return aligned_bytes;
 }
 
+inline void* MemoryManager::align(void* p) {
+  uint64_t mask = (uint64_t)kSmallSizeAlignMask;
+  // round to 16-byte alignment
+  auto aligned_uint_p = (uintptr_t(p) + mask) & ~(mask);
+  // make sure I'm sane
+  assert((uintptr_t(aligned_uint_p) & mask) == 0);
+  return (void*)aligned_uint_p;
+}
+
 inline uint32_t MemoryManager::estimateCap(uint32_t requested) {
   return MemoryManager::align(requested);
 }
@@ -181,7 +190,7 @@ inline void* MemoryManager::mallocSmallSize(uint32_t bytes) {
   void* p = sequentialAllocate(m_lineCursor, m_lineLimit, bytes);
   if (LIKELY(p != nullptr)) {
     FTRACE(3, "mallocSmallSize: {} -> {}\n", bytes, p);
-    m_heap.setMapBit(p, /*overflow*/ false);
+    m_heap.setMapBit(p);
     return p;
   }
   if (bytes <= kLineSize) {

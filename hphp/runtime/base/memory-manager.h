@@ -305,6 +305,8 @@ struct MemBlock {
   size_t size; // bytes
 };
 
+typedef std::bitset<kBlockSize / 16> live_map;
+
 struct ImmixBlock {
   void* ptr;
   size_t size; // should always be kBlockSize
@@ -312,17 +314,17 @@ struct ImmixBlock {
   uint8_t marked;
   uint8_t overflow;
   // 1 bit per 16 bytes/128 bits in the heap
-  std::bitset<kBlockSize / 16> map;
+  live_map map;
   ImmixBlock(void* ptr, size_t size) : ptr(ptr), size(size), marked(0), overflow(0) {}
 
-  void setMapBit(void* p) {
+  void setMapBit(const void* p) {
     assert(uintptr_t(p) >= uintptr_t(ptr));
     assert(uintptr_t(p) < uintptr_t(ptr) + size);
     auto bit_pos = ((uintptr_t(p) - uintptr_t(ptr)) / 16);
     map[bit_pos] = true;
   }
 
-  bool testMapBit(void* p) {
+  bool testMapBit(const void* p) {
     assert(uintptr_t(p) >= uintptr_t(ptr));
     assert(uintptr_t(p) < uintptr_t(ptr) + size);
     auto bit_pos = ((uintptr_t(p) - uintptr_t(ptr)) / 16);
@@ -343,6 +345,7 @@ struct BigHeap {
 
   // return true if ptr points into one of the slabs
   bool contains(void* ptr) const;
+  bool containsBig(const void* ptr) const;
 
   void markLineForSmall(const void* p);
   void markLinesForMedium(const void* p, uint32_t size);
@@ -353,8 +356,10 @@ struct BigHeap {
 
   std::vector<BigNode*> getBigs();
 
-  void setMapBit(void* p, bool overflow);
-  bool testMapBit(void* p);
+  void setMapBit(const void* p);
+  void setMapBitSlow(const void* p);
+  bool testMapBit(const void* p);
+  void resetMapBits();
   void dumpMapBits();
 
   // allocate a MemBlock of at least size bytes, track in m_slabs.
@@ -380,6 +385,9 @@ struct BigHeap {
 
   // allow whole-heap iteration
   template<class Fn> void iterate(Fn);
+  // iterate over slabs (immix lines and blocks) only
+  template<class Fn> void iterateSlabs(Fn);
+  // iterate immix lines with line mark
   template<class Fn> void forEachLine(Fn);
 
  protected:
@@ -472,6 +480,7 @@ struct MemoryManager {
   // Allocation.
 
   static uint32_t align(uint32_t bytes);
+  static void* align(void* p);
 
   /*
    * Return a lower bound estimate of the capacity that will be returned for
@@ -741,7 +750,7 @@ struct MemoryManager {
    * Heap iterator methods.
    */
   template<class Fn> void iterate(Fn);
-  template<class Fn> void forEachHeader(Fn);
+  template<class Fn> void iterateSlabs(Fn);   
   template<class Fn> void forEachObject(Fn);
   template<class Fn> void forEachLine(Fn);
 
