@@ -354,12 +354,9 @@ struct BigHeap {
   void resetBlockPointer();
   void freeUnusedBlocks();
 
-  std::vector<BigNode*> getBigs();
-
   void setMapBit(const void* p);
   void setMapBitSlow(const void* p);
   bool testMapBit(const void* p);
-  void resetMapBits();
   void dumpMapBits();
 
   // allocate a MemBlock of at least size bytes, track in m_slabs.
@@ -904,7 +901,6 @@ private:
   void* m_blockCursor;
   void* m_blockLimit;
 
-  std::vector<std::pair<Header*, std::size_t>> m_heap_allocations;
   StringDataNode m_strings; // in-place node is head of circular list
   std::vector<APCLocalArray*> m_apc_arrays;
   MemoryUsageStats m_stats;

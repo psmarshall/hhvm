@@ -45,7 +45,7 @@ struct Marker {
   explicit Marker(BigHeap* heap) : heap(heap) {}
   void init();
   void trace();
-  void sweep(std::vector<std::pair<Header*, std::size_t>>& allocs);
+  void sweep();
 
   // mark exact pointers
   void operator()(const StringData*);
@@ -526,10 +526,9 @@ DEBUG_ONLY bool check_sweep_header(const Header* h) {
 }
 
 // another pass through the heap now that everything is marked.
-void Marker::sweep(std::vector<std::pair<Header*, std::size_t>>& allocs) {
+void Marker::sweep() {
   Counter marked, ambig, freed;
   std::vector<Header*> reaped;
-  std::vector<std::pair<Header*, std::size_t>> survivors;
 
   auto& mm = MM();
 
@@ -545,7 +544,7 @@ void Marker::sweep(std::vector<std::pair<Header*, std::size_t>>& allocs) {
         mm.markLinesForMedium(h, h->size());
       }
       // live bit is true, don't need to change it
-      survivors.emplace_back(h, h->size()); // object lives, don't do anything to it
+      // object lives, don't do anything to it
       return;
     }
     // object dies
@@ -593,29 +592,11 @@ void Marker::sweep(std::vector<std::pair<Header*, std::size_t>>& allocs) {
         break;
     }
   });
-  
-  FTRACE(2, "allocations before sweep: {}, removed: {}, remaining: {}\n",
-    allocs.size(), allocs.size() - survivors.size(), survivors.size());
-
-  allocs = survivors;
-
-  for (const auto& pair : survivors) {
-    bool alive = heap->testMapBit(pair.first);
-    if (!alive) {
-      FTRACE(2, "!! survivor not marked in live-map ptr={}\n", pair.first);
-    }
-    assert(alive);
-  }
 
   // It's safe to free unreachable objects.
   // None of these actually *free* anything but they may run
   // finalization logic
   for (auto h : reaped) {
-    bool alive = heap->testMapBit(h);
-    if (alive) {
-      FTRACE(2, "!! dead thing marked in live-map ptr={}\n", h);
-    }
-    assert(!alive);
     if (h->kind() == HK::Apc) {
       h->apc_.reap(); // calls smart_free() and smartFreeSize()
     } else if (h->kind() == HK::String) {
@@ -624,7 +605,6 @@ void Marker::sweep(std::vector<std::pair<Header*, std::size_t>>& allocs) {
       if (obj->getAttribute(ObjectData::HasDynPropArr)) {
         g_context->dynPropTable.erase(obj);
       }
-      // mm.objFree(h, h->size());
     }
   }
 
@@ -671,20 +651,12 @@ void MemoryManager::collect() {
   TRACE(1, "MemoryManager::collect() called\n");
   if (!RuntimeOption::EvalEnableGC || empty()) return;
 
-  m_heap.dumpMapBits();
-
-  for (const auto& pair : m_heap_allocations) {
-    bool alive = m_heap.testMapBit(pair.first);
-    if (!alive) {
-      FTRACE(2, "!! heap_ptr={}\n", pair.first);
-    }
-    assert(alive);
-  }
+  if (debug) m_heap.dumpMapBits();
 
   Marker mkr(&m_heap);
   mkr.init();
   mkr.trace();
-  mkr.sweep(m_heap_allocations);
+  mkr.sweep();
 }
 
 }

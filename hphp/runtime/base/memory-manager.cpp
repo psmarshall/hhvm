@@ -534,8 +534,6 @@ void MemoryManager::resetAllocator() {
   // free the heap
   m_heap.reset();
 
-  m_heap_allocations.clear();
-
   m_lineCursor = m_lineLimit = nullptr;
 
   resetStatsImpl(true);
@@ -670,7 +668,7 @@ void MemoryManager::checkHeap() {
     TRACE(4, "checkHeap: line %p\n markByte(%d)\n", p, markByte);
   });
 
-  for (auto& pair : m_heap_allocations) {
+  iterate([&](Header* h) {
     auto h = pair.first;
     switch (h->kind()) {
       case HeaderKind::Apc:
@@ -708,7 +706,7 @@ void MemoryManager::checkHeap() {
         assert(false && "get outta here");
         break;
     }
-  }
+  });
 
   // check the apc array list
   for (auto a : m_apc_arrays) {
@@ -731,25 +729,6 @@ void MemoryManager::checkHeap() {
     markedLines);
 }
 
-void handler(int sig) {
-  void *array[10];
-  size_t size;
-
-  // get void*'s for all entries on the stack
-  size = backtrace(array, 10);
-
-  // print out all the frames to stderr
-  fprintf(stderr, "Error: signal %d:\n", sig);
-  backtrace_symbols_fd(array, size, STDERR_FILENO);
-
-  StackTraceNoHeap st;
-  st.log("segv", STDERR_FILENO, "debug", 666);
-
-
-  exit(1);
-}
-
-
 void* MemoryManager::sequentialAllocate(void*& cursor, void* limit, 
                                         uint32_t bytes) {
   assert((uintptr_t(cursor) & kSmallSizeAlignMask) == 0);
@@ -769,8 +748,6 @@ void* MemoryManager::sequentialAllocate(void*& cursor, void* limit,
     // the other assertions imply p is aligned here
     TRACE(3, "sequentialAllocate fit %d bytes in %lu space\n", aligned_bytes,
       space);
-    // All allocation happens here
-    m_heap_allocations.emplace_back((Header*)p, aligned_bytes);
     return p;
   }
   
@@ -1172,6 +1149,7 @@ void BigHeap::reset() {
  * to use for normal allocations (non-overflow allocations)
  */
 void BigHeap::setMapBit(const void* p) {
+  assert(MemoryManager::align(p) == p);
   assert(m_pos != -1);
   assert(m_pos < m_slabs.size());
   m_slabs[m_pos].setMapBit(p);
@@ -1183,6 +1161,7 @@ void BigHeap::setMapBit(const void* p) {
  * path.
  */
 void BigHeap::setMapBitSlow(const void* p) {
+  assert(MemoryManager::align(p) == p);
   for (auto& slab : m_slabs) {
     auto block_ptr = uintptr_t(slab.ptr);
     if (uintptr_t(p) >= block_ptr &&
@@ -1198,6 +1177,7 @@ void BigHeap::setMapBitSlow(const void* p) {
  * Check if the heap has a live object registered at address p.
  */
 bool BigHeap::testMapBit(const void* p) {
+  assert(MemoryManager::align(p) == p);
   // could probably do this faster with a binary search for the
   // block through a sorted vector instead
   for (auto& slab : m_slabs) {
@@ -1209,12 +1189,6 @@ bool BigHeap::testMapBit(const void* p) {
   }
   FTRACE(2, "!! couldn't find block in testMapBit p={}\n", p);
   return false;
-}
-
-void BigHeap::resetMapBits() {
-  for (auto& slab : m_slabs) {
-    slab.map.reset();
-  }
 }
 
 void BigHeap::dumpMapBits() {
@@ -1231,10 +1205,6 @@ void BigHeap::flush() {
   assert(empty());
   m_slabs = std::vector<ImmixBlock>{};
   m_bigs = std::vector<BigNode*>{};
-}
-
-std::vector<BigNode*> BigHeap::getBigs() {
-  return m_bigs;
 }
 
 MemBlock BigHeap::allocSlab(size_t size, bool forOverflow) {
