@@ -210,7 +210,7 @@ inline void MemoryManager::freeSmallSize(void* ptr, uint32_t bytes) {
   }
 
   if (debug) eagerGCCheck();
-  // initHole(ptr, bytes);
+  m_heap.unsetMapBitSlow(ptr);
   m_stats.usage -= bytes;
 
   FTRACE(3, "freeSmallSize: {} ({} bytes)\n", ptr, bytes);

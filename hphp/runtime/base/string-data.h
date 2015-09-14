@@ -178,6 +178,7 @@ struct StringData {
    * a helper like decRefStr).
    */
   void release() noexcept;
+  void reap();
   size_t heapSize() const;
 
   /*

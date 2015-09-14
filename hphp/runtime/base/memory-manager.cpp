@@ -1172,6 +1172,19 @@ void BigHeap::setMapBitSlow(const void* p) {
   FTRACE(2, "!! couldn't find block in setMapBitSlow p={}\n", p);
 }
 
+void BigHeap::unsetMapBitSlow(const void* p) {
+  assert(MemoryManager::align(p) == p);
+  for (auto& slab : m_slabs) {
+    auto block_ptr = uintptr_t(slab.ptr);
+    if (uintptr_t(p) >= block_ptr &&
+        uintptr_t(p) <  block_ptr + slab.size) {
+      slab.unsetMapBit(p);
+      return;
+    }
+  }
+  FTRACE(2, "!! couldn't find block in unsetMapBitSlow p={}\n", p);
+}
+
 /*
  * Check if the heap has a live object registered at address p.
  */

@@ -94,15 +94,14 @@ void APCLocalArray::Release(ArrayData* ad) {
   assert(ad->hasExactlyOneRef());
   auto const a = asApcArray(ad);
   a->~APCLocalArray();
-  // MM().freeSmallSize(a, sizeof(APCLocalArray));
+  MM().freeSmallSize(a, sizeof(APCLocalArray));
 }
 
 void APCLocalArray::reap() {
-  // free stuff without running destructor or decrefing contents
+  // clean up without running destructor or decrefing contents
   req::free(m_localCache);
   sweep();
   MM().removeApcArray(this);
-  // MM().freeSmallSize(this, sizeof(APCLocalArray));
 }
 
 size_t APCLocalArray::Vsize(const ArrayData*) { not_reached(); }

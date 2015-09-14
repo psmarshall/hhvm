@@ -324,12 +324,20 @@ struct ImmixBlock {
     map[bit_pos] = true;
   }
 
+  void unsetMapBit(const void* p) {
+    assert(uintptr_t(p) >= uintptr_t(ptr));
+    assert(uintptr_t(p) < uintptr_t(ptr) + size);
+    auto bit_pos = ((uintptr_t(p) - uintptr_t(ptr)) / 16);
+    map[bit_pos] = false;
+  }
+
   bool testMapBit(const void* p) {
     assert(uintptr_t(p) >= uintptr_t(ptr));
     assert(uintptr_t(p) < uintptr_t(ptr) + size);
     auto bit_pos = ((uintptr_t(p) - uintptr_t(ptr)) / 16);
     return map[bit_pos];
   }
+
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -356,6 +364,7 @@ struct BigHeap {
 
   void setMapBit(const void* p);
   void setMapBitSlow(const void* p);
+  void unsetMapBitSlow(const void* p);
   bool testMapBit(const void* p);
   void dumpMapBits();
 

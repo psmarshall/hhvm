@@ -186,8 +186,7 @@ void ObjectData::releaseNoObjDestructCheck() noexcept {
     reinterpret_cast<char*>(stop) - reinterpret_cast<char*>(this);
   assert(size == sizeForNProps(nProps));
   if (LIKELY(size <= kMaxMediumSize)) {
-    // return MM().freeSmallSize(this, size);
-    return;
+    return MM().freeSmallSize(this, size);
   }
   MM().freeBigSize(this, size);
 }

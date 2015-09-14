@@ -600,7 +600,7 @@ void Marker::sweep() {
     if (h->kind() == HK::Apc) {
       h->apc_.reap(); // calls smart_free() and smartFreeSize()
     } else if (h->kind() == HK::String) {
-      h->str_.release(); // no destructor can run, so release() is safe.
+      h->str_.reap();
     } else if (auto obj = h->obj()) {
       if (obj->getAttribute(ObjectData::HasDynPropArr)) {
         g_context->dynPropTable.erase(obj);
