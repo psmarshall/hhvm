@@ -182,6 +182,7 @@ inline void* MemoryManager::mallocSmallSize(uint32_t bytes) {
   if (LIKELY(p != nullptr)) {
     // m_bumped++;
     m_lastAllocPtr = p;
+    m_heap.setMapBitFast(p);
     FTRACE(3, "mallocSmallSize: {} -> {}\n", bytes, p);
     return p;
   }
@@ -205,6 +206,7 @@ inline void MemoryManager::freeSmallSize(void* ptr, uint32_t bytes) {
   if (ptr == m_lastAllocPtr) {
     // m_debumped++;
     m_lineCursor = m_lastAllocPtr;
+    m_heap.resetMapBitFast(m_lineCursor);
   } else {
     initHole(ptr, bytes);
   }

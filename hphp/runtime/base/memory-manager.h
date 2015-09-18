@@ -22,6 +22,7 @@
 #include <utility>
 #include <set>
 #include <unordered_map>
+#include <bitset>
 
 #include <folly/Memory.h>
 
@@ -227,9 +228,10 @@ constexpr uint32_t kSmallSizeAlignMask = kSmallSizeAlign - 1;
 
 constexpr unsigned kLgSizeClassesPerDoubling = 2;
 
-constexpr unsigned kLineSize = 64;
+constexpr unsigned kLineSize = 128;
 constexpr unsigned kBlockSize = 32768;
 constexpr unsigned kMaxMediumSize = 8192; //8kB is max medium object (1/4 block)
+constexpr unsigned kBitMapSize = kBlockSize / 16;
 constexpr unsigned kLinesPerBlock = kBlockSize / kLineSize;
 
 constexpr unsigned kSmallPreallocCountLimit = 8;
@@ -309,8 +311,23 @@ struct ImmixBlock {
   uint8_t lineMap[kLinesPerBlock] = {}; // 256 lines per block for 32kB block
   uint8_t marked;
   uint8_t overflow;
+  std::bitset<kBitMapSize> map;
 
   ImmixBlock(void* ptr, size_t size) : ptr(ptr), size(size), marked(0), overflow(0) {}
+
+  void setMapBit(void* p) {
+    assert(uintptr_t(p) >= uintptr_t(ptr));
+    assert(uintptr_t(p) < uintptr_t(ptr) + size);
+    auto bit_pos = ((uintptr_t(p) - uintptr_t(ptr)) / 16);
+    map[bit_pos] = true;
+  }
+
+  void resetMapBit(void* p) {
+    assert(uintptr_t(p) >= uintptr_t(ptr));
+    assert(uintptr_t(p) < uintptr_t(ptr) + size);
+    auto bit_pos = ((uintptr_t(p) - uintptr_t(ptr)) / 16);
+    map[bit_pos] = false;
+  }
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -334,7 +351,11 @@ struct BigHeap {
   void resetBlockPointer();
   void freeUnusedBlocks();
 
-  void dump();
+  void setMapBit(void* p);
+  void setMapBitFast(void* p);
+  void resetMapBit(void* p);
+  void resetMapBitFast(void* p);
+  void dumpMapBits();
 
   // allocate a MemBlock of at least size bytes, track in m_slabs.
   MemBlock allocSlab(size_t size, bool forOverflow);

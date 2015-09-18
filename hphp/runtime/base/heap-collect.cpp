@@ -700,8 +700,6 @@ void MemoryManager::collect() {
   // is free'd during the sweep, in which case a proper free-node would
   // not be initialised.
   m_lastAllocPtr = nullptr;
-
-  m_heap.dump();
   
   Marker mkr;
   mkr.init();

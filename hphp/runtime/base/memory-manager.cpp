@@ -895,6 +895,7 @@ void* MemoryManager::overflowAlloc(uint32_t bytes) {
 
   void* p = sequentialAllocate(m_blockCursor, m_blockLimit, bytes);
   if (p != nullptr) {
+    m_heap.setMapBit(p);
     // TODO refactor
     uint32_t space = uintptr_t(m_blockLimit) - uintptr_t(m_blockCursor);
     assert(space == 0 || space >= sizeof(FreeNode));
@@ -909,6 +910,7 @@ void* MemoryManager::overflowAlloc(uint32_t bytes) {
     return nullptr; //OOM
   }
   auto ret = sequentialAllocate(m_blockCursor, m_blockLimit, bytes);
+  m_heap.setMapBit(p);
   // TODO refactor
   uint32_t space = uintptr_t(m_blockLimit) - uintptr_t(m_blockCursor);
   assert(space == 0 || space >= sizeof(FreeNode));
@@ -1160,29 +1162,42 @@ void BigHeap::reset() {
   m_bigs.clear();
 }
 
-void BigHeap::dump() {
-  // TRACE(2, "BigHeap dump:\n\n");
-  // auto charCounter = 0, blockCounter = 0;
-  // MM().forEachHeader([&](Header* h) {
-  //   auto size = MemoryManager::align(h->size());
-  //   for (uintptr_t p = uintptr_t(h); p < uintptr_t(h) + size; p += 16) {
-  //     if (charCounter == 64) {
-  //       TRACE(2, "\n");
-  //       charCounter = 0;
-  //     }
-  //     if (blockCounter == 2048) {
-  //       TRACE(2, "\n");
-  //       blockCounter = 0;
-  //     }
-  //     if (h->kind() == HeaderKind::Hole) {
-  //       TRACE(2, "-");
-  //     } else {
-  //       TRACE(2, "x");
-  //     }
-  //     charCounter++;
-  //     blockCounter++;
-  //   }
-  // });
+void BigHeap::setMapBit(void* p) {
+  // iterate over all blocks because reasons
+  for (auto& slab : m_slabs) {
+    auto block_ptr = uintptr_t(slab.ptr);
+    if (uintptr_t(p) >= block_ptr &&
+        uintptr_t(p) <  block_ptr + slab.size) {
+      slab.setMapBit(p);
+      return;
+    }
+  }
+  FTRACE(2, "!! couldn't find block for overflow setMapBit\n");
+}
+
+void BigHeap::setMapBitFast(void* p) {
+  assert(m_pos != -1);
+  assert(m_pos < m_slabs.size());
+  m_slabs[m_pos].setMapBit(p);
+}
+
+void BigHeap::resetMapBit(void* p) {
+  // iterate over all blocks because reasons
+  for (auto& slab : m_slabs) {
+    auto block_ptr = uintptr_t(slab.ptr);
+    if (uintptr_t(p) >= block_ptr &&
+        uintptr_t(p) <  block_ptr + slab.size) {
+      slab.resetMapBit(p);
+      return;
+    }
+  }
+  FTRACE(2, "!! couldn't find block for overflow setMapBit\n");
+}
+
+void BigHeap::resetMapBitFast(void* p) {
+  assert(m_pos != -1);
+  assert(m_pos < m_slabs.size());
+  m_slabs[m_pos].resetMapBit(p);
 }
 
 void BigHeap::flush() {
