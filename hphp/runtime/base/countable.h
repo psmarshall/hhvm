@@ -146,7 +146,7 @@ ALWAYS_INLINE bool decReleaseCheck(GCByte gcbyte) {
   }                                                                     \
   ALWAYS_INLINE void decRefAndRelease() {                               \
     assert(kindIsValid());                                              \
-    if (decReleaseCheck()) release();                                   \
+    /*if (decReleaseCheck()) release();*/                               \
   }                                                                     \
   bool isStatic() const {                                               \
     assert(kindIsValid());                                              \
@@ -188,7 +188,7 @@ ALWAYS_INLINE bool decReleaseCheck(GCByte gcbyte) {
     assert(!MemoryManager::sweeping());                                 \
     assert(kindIsValid());                                              \
     if (!m_hdr.mrb) {                                                   \
-      release();                                                        \
+      /*release();*/                                                    \
       return true;                                                      \
     }                                                                   \
     return false;                                                       \

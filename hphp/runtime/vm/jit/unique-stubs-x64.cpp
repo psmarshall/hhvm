@@ -99,11 +99,11 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
   Label release;
   Label loopHead;
 
-  auto const rData     = rarg(0); // not live coming in, but used
+  // auto const rData     = rarg(0); // not live coming in, but used
                                              // for destructor calls
   auto const rIter     = rarg(1); // live coming in
   auto const rFinished = rdx;
-  auto const rType     = ecx;
+  // auto const rType     = ecx;
   int const tvSize     = sizeof(TypedValue);
 
   Asm a { cb };
@@ -111,20 +111,20 @@ TCA emitFreeLocalsHelpers(CodeBlock& cb, UniqueStubs& us) {
   auto const start = a.frontier();
 
 asm_label(a, release);
-  a.    loadq  (rIter[TVOFF(m_data)], rData);
-  a.    testb  (FAST_MRB_MASK, rData[FAST_GC_BYTE_OFFSET]);
-  a.    jz8    (doRelease);
+  // a.    loadq  (rIter[TVOFF(m_data)], rData);
+  // a.    testb  (FAST_MRB_MASK, rData[FAST_GC_BYTE_OFFSET]);
+  // a.    jz8    (doRelease);
   a.    ret    ();
 asm_label(a, doRelease);
-  a.    push    (rIter);
-  a.    push    (rFinished);
-  a.    call    (lookupDestructor(a, PhysReg(rType)));
-  // Three quads between where %rsp is now and the saved RIP of the call into
-  // the stub: two from the pushes above, and one for the saved RIP of the call
-  // to `release' done below (e.g., in emitDecLocal).
-  mcg->fixupMap().recordFixup(a.frontier(), makeIndirectFixup(3));
-  a.    pop     (rFinished);
-  a.    pop     (rIter);
+  // a.    push    (rIter);
+  // a.    push    (rFinished);
+  // a.    call    (lookupDestructor(a, PhysReg(rType)));
+  // // Three quads between where %rsp is now and the saved RIP of the call into
+  // // the stub: two from the pushes above, and one for the saved RIP of the call
+  // // to `release' done below (e.g., in emitDecLocal).
+  // mcg->fixupMap().recordFixup(a.frontier(), makeIndirectFixup(3));
+  // a.    pop     (rFinished);
+  // a.    pop     (rIter);
   a.    ret     ();
 
   auto emitDecLocal = [&]() {
@@ -132,10 +132,10 @@ asm_label(a, doRelease);
 
     // Zero-extend the type while loading so it can be used as an array index
     // to lookupDestructor() above.
-    emitLoadTVType(a, rIter[TVOFF(m_type)], rType);
-    emitCmpTVType(a, KindOfRefCountThreshold, rbyte(rType));
-    a.  jle8   (skipDecRef);
-    a.  call   (release);
+    // emitLoadTVType(a, rIter[TVOFF(m_type)], rType);
+    // emitCmpTVType(a, KindOfRefCountThreshold, rbyte(rType));
+    // a.  jle8   (skipDecRef);
+    // a.  call   (release);
   asm_label(a, skipDecRef);
   };
 

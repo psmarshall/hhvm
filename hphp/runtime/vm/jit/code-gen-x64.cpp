@@ -2391,40 +2391,40 @@ float CodeGenerator::decRefDestroyRate(const IRInstruction* inst,
 void CodeGenerator::decRefImpl(Vout& v, const IRInstruction* inst,
                                const OptDecRefProfile& profile,
                                bool unlikelyDestroy) {
-  auto const ty   = inst->src(0)->type();
-  auto const base = srcLoc(inst, 0).reg(0);
+  // auto const ty   = inst->src(0)->type();
+  // auto const base = srcLoc(inst, 0).reg(0);
 
-  auto destroy = [&] (Vout& v) {
-    emitIncStat(v, unlikelyDestroy ? Stats::TC_DecRef_Normal_Destroy
-                                   : Stats::TC_DecRef_Likely_Destroy);
-    if (profile && profile->profiling()) {
-      v << incwm{rvmtl()[profile->handle() + offsetof(DecRefProfile, destroy)],
-                 v.makeReg()};
-    }
+  // auto destroy = [&] (Vout& v) {
+  //   emitIncStat(v, unlikelyDestroy ? Stats::TC_DecRef_Normal_Destroy
+  //                                  : Stats::TC_DecRef_Likely_Destroy);
+  //   if (profile && profile->profiling()) {
+  //     v << incwm{rvmtl()[profile->handle() + offsetof(DecRefProfile, destroy)],
+  //                v.makeReg()};
+  //   }
 
-    cgCallHelper(
-      v,
-      ty.isKnownDataType()
-        ? mcg->getDtorCall(ty.toDataType())
-        : CppCall::destruct(srcLoc(inst, 0).reg(1)),
-      kVoidDest,
-      SyncOptions::kSyncPoint,
-      argGroup(inst)
-        .reg(base)
-    );
-  };
+  //   cgCallHelper(
+  //     v,
+  //     ty.isKnownDataType()
+  //       ? mcg->getDtorCall(ty.toDataType())
+  //       : CppCall::destruct(srcLoc(inst, 0).reg(1)),
+  //     kVoidDest,
+  //     SyncOptions::kSyncPoint,
+  //     argGroup(inst)
+  //       .reg(base)
+  //   );
+  // };
 
-  emitIncStat(v, unlikelyDestroy ? Stats::TC_DecRef_Normal_Decl
-                                 : Stats::TC_DecRef_Likely_Decl);
+  // emitIncStat(v, unlikelyDestroy ? Stats::TC_DecRef_Normal_Decl
+  //                                : Stats::TC_DecRef_Likely_Decl);
 
-  if (profile && profile->profiling()) {
-    v << incwm{rvmtl()[profile->handle() + offsetof(DecRefProfile, trydec)],
-               v.makeReg()};
-  }
+  // if (profile && profile->profiling()) {
+  //   v << incwm{rvmtl()[profile->handle() + offsetof(DecRefProfile, trydec)],
+  //              v.makeReg()};
+  // }
 
-  auto const sf = v.makeReg();
-  v << testbim{FAST_MRB_MASK, base[FAST_GC_BYTE_OFFSET], sf};
-  ifThen(v, vcold(), CC_Z, sf, destroy, unlikelyDestroy);
+  // auto const sf = v.makeReg();
+  // v << testbim{FAST_MRB_MASK, base[FAST_GC_BYTE_OFFSET], sf};
+  // ifThen(v, vcold(), CC_Z, sf, destroy, unlikelyDestroy);
 }
 
 void CodeGenerator::emitDecRefTypeStat(Vout& v, const IRInstruction* inst) {
@@ -2447,50 +2447,50 @@ void CodeGenerator::emitDecRefTypeStat(Vout& v, const IRInstruction* inst) {
 void CodeGenerator::cgDecRef(IRInstruction *inst) {
   // This is redundant with a check in ifRefCounted, but we check earlier to
   // avoid emitting profiling code in this case.
-  auto const ty = inst->src(0)->type();
-  if (!ty.maybe(TCounted)) return;
+  // auto const ty = inst->src(0)->type();
+  // if (!ty.maybe(TCounted)) return;
 
-  auto& v = vmain();
-  emitDecRefTypeStat(v, inst);
-  OptDecRefProfile profile;
-  auto const destroyRate = decRefDestroyRate(inst, profile, ty);
-  FTRACE(3, "destroyPercent {:.2%} for {}\n", destroyRate, *inst);
+  // auto& v = vmain();
+  // emitDecRefTypeStat(v, inst);
+  // OptDecRefProfile profile;
+  // auto const destroyRate = decRefDestroyRate(inst, profile, ty);
+  // FTRACE(3, "destroyPercent {:.2%} for {}\n", destroyRate, *inst);
 
-  auto const rData = srcLoc(inst, 0).reg(0);
-  auto const rType = srcLoc(inst, 0).reg(1);
-  if (RuntimeOption::EvalHHIROutlineGenericIncDecRef &&
-      profile && profile->optimizing() && !ty.isKnownDataType() &&
-      !mcg->useLLVM()) {
-    auto const data = profile->data(DecRefProfile::reduce);
-    if (data.trydec == 0) {
-      // This DecRef never saw a refcounted type during profiling, so call the
-      // stub in cold, keeping only the type check in main.
-      FTRACE(3, "Emitting partially outlined DecRef for {}, {}\n", data, *inst);
-      auto const sf = v.makeReg();
-      emitCmpTVType(v, sf, KindOfRefCountThreshold, rType);
-      unlikelyIfThen(v, vcold(), CC_NLE, sf, [&](Vout& v) {
-        auto const stub = mcg->tx().uniqueStubs.decRefGeneric;
-        v << copy2{rData, rType, rarg(0), rarg(1)};
-        v << callfaststub{stub, makeFixup(inst->marker()), arg_regs(2)};
-      });
-      return;
-    }
-  }
+  // auto const rData = srcLoc(inst, 0).reg(0);
+  // auto const rType = srcLoc(inst, 0).reg(1);
+  // if (RuntimeOption::EvalHHIROutlineGenericIncDecRef &&
+  //     profile && profile->optimizing() && !ty.isKnownDataType() &&
+  //     !mcg->useLLVM()) {
+  //   auto const data = profile->data(DecRefProfile::reduce);
+  //   if (data.trydec == 0) {
+  //     // This DecRef never saw a refcounted type during profiling, so call the
+  //     // stub in cold, keeping only the type check in main.
+  //     FTRACE(3, "Emitting partially outlined DecRef for {}, {}\n", data, *inst);
+  //     auto const sf = v.makeReg();
+  //     emitCmpTVType(v, sf, KindOfRefCountThreshold, rType);
+  //     unlikelyIfThen(v, vcold(), CC_NLE, sf, [&](Vout& v) {
+  //       auto const stub = mcg->tx().uniqueStubs.decRefGeneric;
+  //       v << copy2{rData, rType, rarg(0), rarg(1)};
+  //       v << callfaststub{stub, makeFixup(inst->marker()), arg_regs(2)};
+  //     });
+  //     return;
+  //   }
+  // }
 
-  ifRefCountedType(
-    v, v, ty, srcLoc(inst, 0),
-    [&] (Vout& v) {
-      decRefImpl(
-        v, inst, profile,
-        destroyRate * 100 < RuntimeOption::EvalJitUnlikelyDecRefPercent
-      );
-    }
-  );
+  // ifRefCountedType(
+  //   v, v, ty, srcLoc(inst, 0),
+  //   [&] (Vout& v) {
+  //     decRefImpl(
+  //       v, inst, profile,
+  //       destroyRate * 100 < RuntimeOption::EvalJitUnlikelyDecRefPercent
+  //     );
+  //   }
+  // );
 }
 
 void CodeGenerator::cgDecRefNZ(IRInstruction* inst) {
-  emitIncStat(vmain(), Stats::TC_DecRef_NZ);
-  emitDecRefTypeStat(vmain(), inst);
+  // emitIncStat(vmain(), Stats::TC_DecRef_NZ);
+  // emitDecRefTypeStat(vmain(), inst);
 }
 
 void CodeGenerator::cgCufIterSpillFrame(IRInstruction* inst) {
