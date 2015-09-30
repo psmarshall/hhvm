@@ -379,6 +379,17 @@ if (LINUX OR APPLE)
   FIND_LIBRARY (RESOLV_LIB resolv)
 endif()
 
+FIND_LIBRARY (BFD_LIB libbfd.a)
+FIND_LIBRARY (LIBIBERTY_LIB iberty)
+
+if (NOT BFD_LIB)
+  message(FATAL_ERROR "You need to install binutils")
+endif()
+
+if (NOT LIBIBERTY_LIB)
+  message(FATAL_ERROR "You need to install libiberty (usually bundled with binutils)")
+endif()
+
 if (FREEBSD)
   FIND_LIBRARY (EXECINFO_LIB execinfo)
   if (NOT EXECINFO_LIB)
@@ -502,6 +513,9 @@ macro(hphp_link target)
       target_link_libraries(${target} ${PAM_LIBRARY})
     endif()
   endif()
+
+  target_link_libraries(${target} ${BFD_LIB})
+  target_link_libraries(${target} ${LIBIBERTY_LIB})
 
   if (LIBPTHREAD_LIBRARIES)
     target_link_libraries(${target} ${LIBPTHREAD_LIBRARIES})
