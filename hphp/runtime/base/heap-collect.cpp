@@ -149,7 +149,7 @@ private:
 
 // mark the object at p, return true if first time.
 bool Marker::mark(const void* p) {
-  assert(p && (heap->containsBig(p) || heap->testMapBit(p)));
+  assert(p && heap->header(p));
   auto h = static_cast<const Header*>(p);
   assert(h->kind() <= HK::BigMalloc && h->kind() != HK::ResumableObj);
   auto first = !h->hdr_.mark;
@@ -294,15 +294,14 @@ Marker::operator()(const void* start, size_t len) {
   auto e = (char**)((uintptr_t(start) + len) & ~M); // round down
   for (; s < e; s++) {
     auto p = *s;
-    if (MemoryManager::align(p) != p) {
-      TRACE(2, "!! Skipping non-aligned ambiguous ptr %p\n", p);
-      continue;
-    }
-    auto real = heap->containsBig(p) || (heap->contains(p) && heap->testMapBit(p));
-    if (!real) {
-      continue;
-    }
-    auto h = (Header*)p;
+    // if (MemoryManager::align(p) != p) {
+    //   TRACE(2, "!! Skipping non-aligned ambiguous ptr %p\n", p);
+    //   continue;
+    // }
+    if (!p) continue; // skip nullptrs
+
+    auto h = heap->header(p);
+    if (!h) continue;
     // mark p if it's an interesting kind. since we have metadata for it,
     // it must have a valid header.
     h->hdr_.cmark = true;

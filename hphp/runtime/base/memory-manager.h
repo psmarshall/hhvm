@@ -324,7 +324,7 @@ struct ImmixBlock {
     map[bit_pos] = true;
   }
 
-  bool testMapBit(const void* p) {
+  bool testMapBit(const void* p) const {
     assert(uintptr_t(p) >= uintptr_t(ptr));
     assert(uintptr_t(p) < uintptr_t(ptr) + size);
     auto bit_pos = ((uintptr_t(p) - uintptr_t(ptr)) / 16);
@@ -344,8 +344,9 @@ struct BigHeap {
   }
 
   // return true if ptr points into one of the slabs
-  bool contains(void* ptr) const;
+  bool contains(const void* ptr) const;
   bool containsBig(const void* ptr) const;
+  Header* header(const void* ptr) const;
 
   void markLineForSmall(const void* p);
   void markLinesForMedium(const void* p, uint32_t size);
@@ -356,7 +357,7 @@ struct BigHeap {
 
   void setMapBit(const void* p);
   void setMapBitSlow(const void* p);
-  bool testMapBit(const void* p);
+  bool testMapBit(const void* p) const;
   void dumpMapBits();
 
   // allocate a MemBlock of at least size bytes, track in m_slabs.

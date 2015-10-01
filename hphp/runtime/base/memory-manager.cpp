@@ -596,13 +596,13 @@ void MemoryManager::flush() {
  */
 
 inline void* MemoryManager::malloc(size_t nbytes) {
-  auto const nbytes_padded = nbytes + sizeof(SmallNode);
-  if (LIKELY(nbytes_padded) <= kMaxMediumSize) {
-    auto const ptr = static_cast<SmallNode*>(mallocSmallSize(nbytes_padded));
-    ptr->padbytes = nbytes_padded;
-    ptr->hdr.kind = HeaderKind::SmallMalloc;
-    return ptr + 1;
-  }
+  // auto const nbytes_padded = nbytes + sizeof(SmallNode);
+  // if (LIKELY(nbytes_padded) <= kMaxMediumSize) {
+  //   auto const ptr = static_cast<SmallNode*>(mallocSmallSize(nbytes_padded));
+  //   ptr->padbytes = nbytes_padded;
+  //   ptr->hdr.kind = HeaderKind::SmallMalloc;
+  //   return ptr + 1;
+  // }
   return mallocBig(nbytes);
 }
 
@@ -615,11 +615,11 @@ static_assert(sizeof(SmallNode) == sizeof(BigNode), "");
 
 inline void MemoryManager::free(void* ptr) {
   assert(ptr != 0);
-  auto const n = static_cast<MallocNode*>(ptr) - 1;
-  auto const padbytes = n->small.padbytes;
-  if (LIKELY(padbytes <= kMaxMediumSize)) {
-    return freeSmallSize(&n->small, n->small.padbytes);
-  }
+  // auto const n = static_cast<MallocNode*>(ptr) - 1;
+  // auto const padbytes = n->small.padbytes;
+  // if (LIKELY(padbytes <= kMaxMediumSize)) {
+  //   return freeSmallSize(&n->small, n->small.padbytes);
+  // }
   m_heap.freeBig(ptr);
 }
 
@@ -698,8 +698,8 @@ void MemoryManager::checkHeap() {
       case HeaderKind::ResumableFrame:
       case HeaderKind::NativeData:
       case HeaderKind::SmallMalloc:
-        break;
       case HeaderKind::BigMalloc:
+        break;
       case HeaderKind::BigObj:
       case HeaderKind::Hole:
         assert(false && "get outta here");
@@ -752,8 +752,6 @@ void* MemoryManager::sequentialAllocate(void*& cursor, void* limit,
   
   TRACE(2, "sequentialAllocate could not fit %d bytes in %lu space\n", bytes,
     space);
-
-  // signal(SIGSEGV, handler);   // install our handler
 
   return nullptr;
 }
@@ -1175,7 +1173,7 @@ void BigHeap::setMapBitSlow(const void* p) {
 /*
  * Check if the heap has a live object registered at address p.
  */
-bool BigHeap::testMapBit(const void* p) {
+bool BigHeap::testMapBit(const void* p) const {
   assert(MemoryManager::align(p) == p);
   // could probably do this faster with a binary search for the
   // block through a sorted vector instead
@@ -1244,6 +1242,7 @@ MemBlock BigHeap::allocBig(size_t bytes, HeaderKind kind) {
   auto n = static_cast<BigNode*>(safe_malloc(cap));
 #endif
   enlist(n, kind, cap);
+  FTRACE(1, "BigHeap::allocBig: {} -> {}\n", bytes, n);
   return {n + 1, cap - sizeof(BigNode)};
 }
 
@@ -1254,7 +1253,7 @@ MemBlock BigHeap::callocBig(size_t nbytes) {
   return {n + 1, nbytes};
 }
 
-bool BigHeap::contains(void* ptr) const {
+bool BigHeap::contains(const void* ptr) const {
   auto const ptrInt = reinterpret_cast<uintptr_t>(ptr);
   auto it = std::find_if(std::begin(m_slabs), std::end(m_slabs),
     [&] (ImmixBlock slab) {
@@ -1272,6 +1271,39 @@ bool BigHeap::containsBig(const void* ptr) const {
     }
   );
   return it != std::end(m_bigs);
+}
+
+Header* BigHeap::header(const void* ptr) const {
+  // see if there is a big header before ptr
+  for (auto big : m_bigs) {
+    auto start = (void*)big;
+    if (ptr >= start && ptr < (void*)(uintptr_t(start) + big->nbytes)) {
+      auto h = (Header*)big;
+      if (h->kind() == HeaderKind::BigObj) {
+        // must unwrap BigObj!
+        h = reinterpret_cast<Header*>((&h->big_)+1);
+      }
+      FTRACE(3, "BigHeap::header big at {} found for ptr {}\n", big, ptr);
+      return h;
+    }
+  }
+
+  // see if the liveMap bit is set
+  if (!contains(ptr)) {
+    FTRACE(2, "BigHeap::header couldn't find header at {}\n", ptr);
+    return nullptr;
+  }
+  // only aligned pointers now please
+  if (!(MemoryManager::align(ptr) == ptr)) return nullptr;
+
+  if (testMapBit(ptr)) {
+    FTRACE(3, "BigHeap::header found live header at {}\n", ptr);
+    return (Header*)ptr;
+  }
+  FTRACE(2, 
+    "BigHeap::header couldn't find live header for valid heap address {}. Internal pointer?\n"
+    , ptr);
+  return nullptr;
 }
 
 void BigHeap::markLineForSmall(const void* p) {
@@ -1355,6 +1387,7 @@ void BigHeap::freeUnusedBlocks() {
 
 NEVER_INLINE
 void BigHeap::freeBig(void* ptr) {
+  FTRACE(1, "freeBig {}\n", ptr);
   auto n = static_cast<BigNode*>(ptr) - 1;
   auto i = n->index();
   auto last = m_bigs.back();
