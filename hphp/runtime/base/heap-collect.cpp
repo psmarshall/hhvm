@@ -427,6 +427,7 @@ void Marker::init() {
         total_ += h->size();
         break;
       case HK::Free:
+        assert(false && "Get outta here");
         break;
       case HK::ResumableObj:
         // These shouldn't be encountered on their own, they should always be
@@ -453,24 +454,6 @@ void Marker::trace() {
     work_.pop_back();
     scanHeader(h, *this);
   }
-  // mark all immix lines containing SmallMalloc headers
-  // because we don't actually free them yet
-  // We don't need to do this for BigMalloc header because they
-  // aren't stored in immix lines/blocks, so they won't be
-  // accidentally freed
-  // Use iterateSlabs because it ignores bigs, it will be faster
-  MM().iterateSlabs([&](Header* h, const live_map::reference live) {
-    if (h->kind() == HK::SmallMalloc) {
-      // mark line
-      TRACE(3, "Marking line for SmallMalloc at %p\n", h);
-      if (h->size() > kLineSize) {
-        TRACE(3, "Marking multiple lines for SmallMalloc at %p\n", h);
-        MM().markLinesForMedium(h, h->size());
-      } else {
-        MM().markLineForSmall(h);
-      }
-    }
-  });
 }
 
 // check that headers have a "sensible" state during sweeping.
@@ -576,10 +559,10 @@ void Marker::sweep() {
         freed += h->size();
         break;
       case HK::SmallMalloc:
-        live = true; // need to keep these live 
+        assert(false && "SmallMalloc shouldn't be in Immix heap");
         break;
       case HK::BigMalloc:
-        // Don't free malloc-ed allocations even if they're not reachable.
+        assert(false && "BigMalloc shouldn't be in Immix heap");
         break;
       case HK::Free:
         assert(false && "Free shouldn't be in Immix heap");

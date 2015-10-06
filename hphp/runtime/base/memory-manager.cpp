@@ -626,17 +626,17 @@ inline void MemoryManager::free(void* ptr) {
 inline void* MemoryManager::realloc(void* ptr, size_t nbytes) {
   FTRACE(3, "MemoryManager::realloc: {} to {}\n", ptr, nbytes);
   assert(nbytes > 0);
-  auto const n = static_cast<MallocNode*>(ptr) - 1;
-  if (LIKELY(n->small.padbytes <= kMaxMediumSize)) {
-    void* newmem = req::malloc(nbytes);
-    auto const copySize = std::min(
-      n->small.padbytes - sizeof(SmallNode),
-      nbytes
-    );
-    newmem = memcpy(newmem, ptr, copySize);
-    req::free(ptr);
-    return newmem;
-  }
+  // auto const n = static_cast<MallocNode*>(ptr) - 1;
+  // if (LIKELY(n->small.padbytes <= kMaxMediumSize)) {
+  //   void* newmem = req::malloc(nbytes);
+  //   auto const copySize = std::min(
+  //     n->small.padbytes - sizeof(SmallNode),
+  //     nbytes
+  //   );
+  //   newmem = memcpy(newmem, ptr, copySize);
+  //   req::free(ptr);
+  //   return newmem;
+  // }
   // Ok, it's a big allocation.
   if (debug) eagerGCCheck();
   auto block = m_heap.resizeBig(ptr, nbytes);
@@ -910,7 +910,7 @@ NEVER_INLINE
 void* MemoryManager::mallocBig(size_t nbytes) {
   assert(nbytes > 0);
   auto block = m_heap.allocBig(nbytes, HeaderKind::BigMalloc);
-  updateBigStats();
+  //updateBigStats();
   return block.ptr;
 }
 
@@ -934,7 +934,7 @@ MemBlock MemoryManager::mallocBigSize(size_t bytes) {
 #else
   m_stats.usage += bytes;
 #endif
-  updateBigStats();
+  // updateBigStats();
   auto ptrOut = block.ptr;
   FTRACE(3, "mallocBigSize: {} ({} requested, {} usable)\n",
          ptrOut, bytes, szOut);
@@ -946,7 +946,7 @@ void* MemoryManager::callocBig(size_t totalbytes) {
   if (debug) eagerGCCheck();
   assert(totalbytes > 0);
   auto block = m_heap.callocBig(totalbytes);
-  updateBigStats();
+  // updateBigStats();
   return block.ptr;
 }
 
@@ -959,9 +959,9 @@ void* malloc(size_t nbytes) {
 
 void* calloc(size_t count, size_t nbytes) {
   auto const totalBytes = std::max<size_t>(count * nbytes, 1);
-  if (totalBytes <= kMaxMediumSize) {
-    return memset(req::malloc(totalBytes), 0, totalBytes);
-  }
+  // if (totalBytes <= kMaxMediumSize) {
+  //   return memset(req::malloc(totalBytes), 0, totalBytes);
+  // }
   return MM().callocBig(totalBytes);
 }
 
@@ -1387,8 +1387,8 @@ void BigHeap::freeUnusedBlocks() {
 
 NEVER_INLINE
 void BigHeap::freeBig(void* ptr) {
-  FTRACE(1, "freeBig {}\n", ptr);
   auto n = static_cast<BigNode*>(ptr) - 1;
+  FTRACE(2, "freeBig {}\n", n);
   auto i = n->index();
   auto last = m_bigs.back();
   last->index() = i;
