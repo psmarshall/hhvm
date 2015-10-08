@@ -233,6 +233,7 @@ constexpr unsigned kLineSize = 128;
 constexpr unsigned kBlockSize = 32768;
 constexpr unsigned kMaxMediumSize = 8192; //8kB is max medium object (1/4 block)
 constexpr unsigned kLinesPerBlock = kBlockSize / kLineSize;
+constexpr unsigned kExplicitSpaceInitialSize = 2097152; // 2MB
 
 constexpr unsigned kSmallPreallocCountLimit = 8;
 constexpr uint32_t kSmallPreallocBytesLimit = uint32_t{1} << 9;
@@ -324,12 +325,56 @@ struct ImmixBlock {
     map[bit_pos] = true;
   }
 
-  bool testMapBit(const void* p) const {
+  // handle interior pointers by tracking left until we hit a 
+  // live object
+  void* startForAddress(const void* p) const {
     assert(uintptr_t(p) >= uintptr_t(ptr));
     assert(uintptr_t(p) < uintptr_t(ptr) + size);
+    // get bit position for p, also handles non-aligned ptrs
     auto bit_pos = ((uintptr_t(p) - uintptr_t(ptr)) / 16);
-    return map[bit_pos];
+
+    // step left through the bit map to the next live header
+    for (int i = bit_pos; i >= 0; i--) {
+      if (map[i]) {
+        return (void*)(uintptr_t(ptr) + 16 * i);
+      }
+    }
+    // we didn't find a live header for p
+    return nullptr;
   }
+};
+
+/*
+ * Rewind Counter - provides stats on rewind/lazy bump pointer allocation
+ */
+struct RWC {
+  BigNode* last_alloc = nullptr;
+  size_t rewindable = 0;
+  size_t count = 0;
+  size_t total = 0;
+  void alloc(BigNode* p, size_t n) {
+    last_alloc = p;
+    total += n;
+    count++;
+  }
+  void dealloc(BigNode* p) { 
+    if (p == last_alloc) rewindable++;
+  }
+  double percent() {
+    if (count != 0) return (double)rewindable / (double)count * 100;
+    return 0;
+  }
+  std::string stat() {
+    return std::to_string(rewindable) + "/" +  std::to_string(count) +
+      " (" + std::to_string(total) + ") bytes";
+  }
+  void reset() {
+    count = 0;
+    rewindable = 0;
+    last_alloc = nullptr;
+    total = 0;
+  }
+
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -346,6 +391,7 @@ struct BigHeap {
   // return true if ptr points into one of the slabs
   bool contains(const void* ptr) const;
   bool containsBig(const void* ptr) const;
+  bool containsExp(const void* ptr) const;
   Header* header(const void* ptr) const;
 
   void markLineForSmall(const void* p);
@@ -357,11 +403,14 @@ struct BigHeap {
 
   void setMapBit(const void* p);
   void setMapBitSlow(const void* p);
-  bool testMapBit(const void* p) const;
+  void setMapBitSlowExp(const void* p);
+  void* startForAddress(const void* p) const;
+  void* startForAddressExp(const void* p) const;
   void dumpMapBits();
 
   // allocate a MemBlock of at least size bytes, track in m_slabs.
   MemBlock allocSlab(size_t size, bool forOverflow);
+  MemBlock allocExpSlab(size_t size);
 
   // the next recyclable block
   ImmixBlock getNextRecyclableBlock();
@@ -374,6 +423,8 @@ struct BigHeap {
   MemBlock callocBig(size_t size);
   MemBlock resizeBig(void* p, size_t size);
   void freeBig(void*);
+
+  void prepareForCollect();
 
   // free all slabs and big blocks
   void reset();
@@ -393,8 +444,14 @@ struct BigHeap {
 
  protected:
   std::vector<ImmixBlock> m_slabs;
+  std::vector<ImmixBlock> m_exps;
   int32_t m_pos;
   std::vector<BigNode*> m_bigs;
+  RWC m_rwc;
+  void* m_exp_cursor{nullptr};
+  void* m_exp_limit{nullptr};
+  void* m_exp_last{nullptr};
+  uint32_t m_exp_lag{0};
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -912,6 +969,8 @@ private:
 #endif
   std::vector<NativeNode*> m_natives;
   SweepableList m_sweepables;
+
+  size_t m_called = 0;
 
   mutable RootMap<ResourceData>* m_resourceRoots{nullptr};
   mutable RootMap<ObjectData>* m_objectRoots{nullptr};

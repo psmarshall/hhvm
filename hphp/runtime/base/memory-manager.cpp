@@ -1128,11 +1128,23 @@ void MemoryManager::eagerGCCheck() {
 void BigHeap::reset() {
   TRACE(1, "BigHeap-reset: slabs %lu bigs %lu\n", m_slabs.size(),
         m_bigs.size());
+  FTRACE(1, "rewindable: {} ({})\n", m_rwc.stat(), m_rwc.percent());
+  m_rwc.reset();
   for (auto slab : m_slabs) {
     free(slab.ptr);
   }
   m_slabs.clear();
   m_pos = -1;
+
+  for (auto exp : m_exps) {
+    free(exp.ptr);
+  }
+  m_exps.clear();
+  m_exp_lag = 0;
+  m_exp_last = nullptr;
+  m_exp_cursor = nullptr;
+  m_exp_limit = nullptr;
+
   for (auto n : m_bigs) {
     free(n);
   }
@@ -1170,22 +1182,45 @@ void BigHeap::setMapBitSlow(const void* p) {
   FTRACE(2, "!! couldn't find block in setMapBitSlow p={}\n", p);
 }
 
-/*
- * Check if the heap has a live object registered at address p.
- */
-bool BigHeap::testMapBit(const void* p) const {
+void BigHeap::setMapBitSlowExp(const void* p) {
   assert(MemoryManager::align(p) == p);
-  // could probably do this faster with a binary search for the
-  // block through a sorted vector instead
+  for (auto& slab : m_exps) {
+    auto block_ptr = uintptr_t(slab.ptr);
+    if (uintptr_t(p) >= block_ptr &&
+        uintptr_t(p) <  block_ptr + slab.size) {
+      slab.setMapBit(p);
+      return;
+    }
+  }
+  FTRACE(2, "!! couldn't find block in setMapBitSlowExp p={}\n", p);
+}
+
+/*
+ * Find the header pointer for the address pointed to by p.
+ * Assumes p is in the slabs (check first with contains()).
+ */
+void* BigHeap::startForAddress(const void* p) const {
   for (auto& slab : m_slabs) {
     auto block_ptr = uintptr_t(slab.ptr);
     if (uintptr_t(p) >= block_ptr &&
         uintptr_t(p) <  block_ptr + slab.size) {
-      return slab.testMapBit(p);
+      return slab.startForAddress(p);
     }
   }
-  FTRACE(2, "!! couldn't find block in testMapBit p={}\n", p);
-  return false;
+  FTRACE(2, "!! couldn't find block in startForAddress p={}\n", p);
+  return nullptr;
+}
+
+void* BigHeap::startForAddressExp(const void* p) const {
+  for (auto& slab : m_exps) {
+    auto block_ptr = uintptr_t(slab.ptr);
+    if (uintptr_t(p) >= block_ptr &&
+        uintptr_t(p) <  block_ptr + slab.size) {
+      return slab.startForAddress(p);
+    }
+  }
+  FTRACE(2, "!! couldn't find block in startForAddressExp p={}\n", p);
+  return nullptr;
 }
 
 void BigHeap::dumpMapBits() {
@@ -1214,6 +1249,13 @@ MemBlock BigHeap::allocSlab(size_t size, bool forOverflow) {
   return {slab, size};
 }
 
+MemBlock BigHeap::allocExpSlab(size_t size) {
+  void* slab = safe_malloc(size);
+  ImmixBlock b = ImmixBlock{slab, size};
+  m_exps.push_back(b);
+  return {slab, size};
+}
+
 ImmixBlock BigHeap::getNextRecyclableBlock() {
   if (!m_slabs.empty() && m_pos < m_slabs.size() - 1) {
     while (m_slabs[++m_pos].overflow != 0) {
@@ -1234,16 +1276,59 @@ void BigHeap::enlist(BigNode* n, HeaderKind kind, size_t size) {
 }
 
 MemBlock BigHeap::allocBig(size_t bytes, HeaderKind kind) {
+  if (kind == HeaderKind::BigObj) {
 #ifdef USE_JEMALLOC
-  auto n = static_cast<BigNode*>(mallocx(bytes + sizeof(BigNode), 0));
-  auto cap = sallocx(n, 0);
+    auto n = static_cast<BigNode*>(mallocx(bytes + sizeof(BigNode), 0));
+    auto cap = sallocx(n, 0);
 #else
-  auto cap = bytes + sizeof(BigNode);
-  auto n = static_cast<BigNode*>(safe_malloc(cap));
+    auto cap = bytes + sizeof(BigNode);
+    auto n = static_cast<BigNode*>(safe_malloc(cap));
 #endif
-  enlist(n, kind, cap);
-  FTRACE(1, "BigHeap::allocBig: {} -> {}\n", bytes, n);
-  return {n + 1, cap - sizeof(BigNode)};
+    enlist(n, kind, cap);
+    FTRACE(2, "BigHeap::allocBig: BigObj {} -> {}\n", bytes, n);
+    return {n + 1, cap - sizeof(BigNode)};
+  }
+  // else it is an explicit allocation, so use the special
+  // lazy bump-pointer space
+
+  // set up bump pointer and limit
+  if (!m_exp_cursor) {
+    MemBlock block = allocExpSlab(kBlockSize);
+    m_exp_cursor = block.ptr;
+    m_exp_limit = (void*)(uintptr_t(block.ptr) + block.size);
+  }
+  // lazy bump
+  if (m_exp_lag != 0) {
+    setMapBitSlowExp(m_exp_cursor); // mark live
+    m_exp_cursor = (void*)(uintptr_t(m_exp_cursor) + m_exp_lag); // bump
+  }
+
+  // allocate in 16 byte alignments
+  bytes = MemoryManager::align(bytes);
+  auto cap = bytes + sizeof(BigNode);
+
+  // check we have enough space
+  auto space = uintptr_t(m_exp_limit) - uintptr_t(m_exp_cursor);
+  if (cap > space) {
+    // get a new block
+    MemBlock block = allocExpSlab(kBlockSize);
+    m_exp_cursor = block.ptr;
+    m_exp_limit = (void*)(uintptr_t(block.ptr) + block.size);
+  }
+
+  // set the header
+  auto n = static_cast<BigNode*>(m_exp_cursor);
+  n->nbytes = cap;
+  n->hdr.kind = HeaderKind::BigMalloc;
+
+  // don't bump the pointer yet, but store the lag
+  m_exp_lag = cap;
+  m_exp_last = n; // so we can match the next free
+
+  FTRACE(2, "BigHeap::allocBig: BigMalloc {} -> {}\n", cap, n);
+  
+  return {n + 1, bytes};
+  //m_rwc.alloc(n, cap);
 }
 
 MemBlock BigHeap::callocBig(size_t nbytes) {
@@ -1262,6 +1347,17 @@ bool BigHeap::contains(const void* ptr) const {
     }
   );
   return it != std::end(m_slabs);
+}
+
+bool BigHeap::containsExp(const void* ptr) const {
+  auto const ptrInt = reinterpret_cast<uintptr_t>(ptr);
+  auto it = std::find_if(std::begin(m_exps), std::end(m_exps),
+    [&] (ImmixBlock slab) {
+      auto const baseInt = reinterpret_cast<uintptr_t>(slab.ptr);
+      return ptrInt >= baseInt && ptrInt < baseInt + slab.size;
+    }
+  );
+  return it != std::end(m_exps);
 }
 
 bool BigHeap::containsBig(const void* ptr) const {
@@ -1287,21 +1383,27 @@ Header* BigHeap::header(const void* ptr) const {
       return h;
     }
   }
-
+  if (containsExp(ptr)) {
+    auto h = startForAddressExp(ptr);
+    if (h) {
+      return (Header*)h;
+    }
+    FTRACE(2, "!! BigHeap::header couldn't find header for exp at {}\n", ptr);
+    return nullptr;
+  }
   // see if the liveMap bit is set
   if (!contains(ptr)) {
     FTRACE(2, "BigHeap::header couldn't find header at {}\n", ptr);
     return nullptr;
   }
-  // only aligned pointers now please
-  if (!(MemoryManager::align(ptr) == ptr)) return nullptr;
 
-  if (testMapBit(ptr)) {
+  auto h = startForAddress(ptr);
+  if (h) {
     FTRACE(3, "BigHeap::header found live header at {}\n", ptr);
-    return (Header*)ptr;
+    return (Header*)h;
   }
   FTRACE(2, 
-    "BigHeap::header couldn't find live header for valid heap address {}. Internal pointer?\n"
+    "!! BigHeap::header couldn't find live header for valid heap address {}\n"
     , ptr);
   return nullptr;
 }
@@ -1385,29 +1487,63 @@ void BigHeap::freeUnusedBlocks() {
   );
 }
 
+void BigHeap::prepareForCollect() {
+  // mark last allocation live
+  if (m_exp_lag != 0 && m_exp_cursor) {
+    setMapBitSlowExp(m_exp_cursor); // mark live
+  }
+  m_exp_cursor = nullptr;
+  m_exp_limit = nullptr;
+  m_exp_last = nullptr;
+  m_exp_lag = 0;
+}
+
 NEVER_INLINE
 void BigHeap::freeBig(void* ptr) {
   auto n = static_cast<BigNode*>(ptr) - 1;
-  FTRACE(2, "freeBig {}\n", n);
-  auto i = n->index();
-  auto last = m_bigs.back();
-  last->index() = i;
-  m_bigs[i] = last;
-  m_bigs.pop_back();
-  free(n);
+  if (n->hdr.kind == HeaderKind::BigObj) {
+    FTRACE(2, "freeBig BigObj {}\n", n);
+    auto i = n->index();
+    auto last = m_bigs.back();
+    last->index() = i;
+    m_bigs[i] = last;
+    m_bigs.pop_back();
+    free(n);
+    return;
+  }
+  // explicit allocation
+  //m_rwc.dealloc(n);
+
+  // if we were the last thing allocated, there is no lag anymore
+  // just overwrite us on the next allocation
+  if (n == m_exp_last) {
+    m_exp_lag = 0;
+    FTRACE(2, "freeBig BigMalloc retreating! {}\n", n);
+  } else {
+    // need to try and free ourself... no way to do that, just leak.
+    FTRACE(2, "freeBig BigMalloc leaking... {}\n", n);
+  }
 }
 
 MemBlock BigHeap::resizeBig(void* ptr, size_t newsize) {
   // Since we don't know how big it is (i.e. how much data we should memcpy),
   // we have no choice but to ask malloc to realloc for us.
   auto const n = static_cast<BigNode*>(ptr) - 1;
-  auto const newNode = static_cast<BigNode*>(
-    safe_realloc(n, newsize + sizeof(BigNode))
-  );
-  if (newNode != n) {
-    m_bigs[newNode->index()] = newNode;
+  if (n->hdr.kind == HeaderKind::BigObj) {
+    auto const newNode = static_cast<BigNode*>(
+      safe_realloc(n, newsize + sizeof(BigNode))
+    );
+    if (newNode != n) {
+      m_bigs[newNode->index()] = newNode;
+    }
+    return {newNode + 1, newsize};
   }
-  return {newNode + 1, newsize};
+  // it was an explicit allocation
+
+  // bigMalloc it again
+  auto newNode = allocBig(n->nbytes, n->hdr.kind);
+  memcpy(newNode.ptr, ptr, n->nbytes - sizeof(BigNode));
+  return newNode;
 }
 
 /////////////////////////////////////////////////////////////////////////

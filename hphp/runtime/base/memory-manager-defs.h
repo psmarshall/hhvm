@@ -167,9 +167,21 @@ inline size_t Header::size() const {
   return 0;
 }
 
-// Iterate over all the slabs and bigs
+// Iterate over all the slabs, bigs and exps
 template<class Fn> void BigHeap::iterate(Fn fn) {
   for (auto& slab: m_slabs) {
+    auto block_ptr = uintptr_t(slab.ptr);
+    for (auto i = 0; i < slab.map.size(); i++) {
+      if (slab.map[i]) {
+        auto h = (Header*)(block_ptr + (i * 16));
+        assert(uintptr_t(h) >= block_ptr &&
+          uintptr_t(h) < block_ptr + slab.size);
+        fn(h);
+      }
+    }
+  }
+
+  for (auto& slab: m_exps) {
     auto block_ptr = uintptr_t(slab.ptr);
     for (auto i = 0; i < slab.map.size(); i++) {
       if (slab.map[i]) {

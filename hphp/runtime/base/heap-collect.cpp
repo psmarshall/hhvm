@@ -630,10 +630,13 @@ void Marker::sweep() {
 }
 
 void MemoryManager::collect() {
-  TRACE(1, "MemoryManager::collect() called\n");
+  m_called++;
+  FTRACE(1, "MemoryManager::collect() called (n={})\n", m_called);
   if (!RuntimeOption::EvalEnableGC || empty()) return;
 
   if (debug) m_heap.dumpMapBits();
+
+  m_heap.prepareForCollect();
 
   Marker mkr(&m_heap);
   mkr.init();
