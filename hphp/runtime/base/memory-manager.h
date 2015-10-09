@@ -347,32 +347,25 @@ struct ImmixBlock {
 /*
  * Rewind Counter - provides stats on rewind/lazy bump pointer allocation
  */
-struct RWC {
-  BigNode* last_alloc = nullptr;
-  size_t rewindable = 0;
-  size_t count = 0;
-  size_t total = 0;
-  void alloc(BigNode* p, size_t n) {
-    last_alloc = p;
-    total += n;
-    count++;
+struct LazyBumpCounter {
+  size_t bumps = 0;
+  size_t allocs = 0;
+  void alloc() {
+    allocs++;
   }
-  void dealloc(BigNode* p) { 
-    if (p == last_alloc) rewindable++;
+  void bump() { 
+    bumps++;
   }
   double percent() {
-    if (count != 0) return (double)rewindable / (double)count * 100;
+    if (bumps != 0) return (double)(allocs - bumps) / (double)allocs * 100;;
     return 0;
   }
   std::string stat() {
-    return std::to_string(rewindable) + "/" +  std::to_string(count) +
-      " (" + std::to_string(total) + ") bytes";
+    return std::to_string(allocs - bumps) + "/" +  std::to_string(allocs);
   }
   void reset() {
-    count = 0;
-    rewindable = 0;
-    last_alloc = nullptr;
-    total = 0;
+    bumps = 0;
+    allocs = 0;
   }
 
 };
@@ -447,7 +440,7 @@ struct BigHeap {
   std::vector<ImmixBlock> m_exps;
   int32_t m_pos;
   std::vector<BigNode*> m_bigs;
-  RWC m_rwc;
+  LazyBumpCounter m_lbcounter;
   void* m_exp_cursor{nullptr};
   void* m_exp_limit{nullptr};
   void* m_exp_last{nullptr};

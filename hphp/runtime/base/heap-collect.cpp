@@ -294,10 +294,6 @@ Marker::operator()(const void* start, size_t len) {
   auto e = (char**)((uintptr_t(start) + len) & ~M); // round down
   for (; s < e; s++) {
     auto p = *s;
-    // if (MemoryManager::align(p) != p) {
-    //   TRACE(2, "!! Skipping non-aligned ambiguous ptr %p\n", p);
-    //   continue;
-    // }
     if (!p) continue; // skip nullptrs
 
     auto h = heap->header(p);

@@ -478,7 +478,7 @@ template void MemoryManager::refreshStatsImpl<false>(MemoryUsageStats& stats);
 void MemoryManager::sweep() {
   assert(!sweeping());
   if (debug) checkHeap();
-  TRACE(2, "MemoryManager::sweep() calling collect()\n");
+  TRACE(1, "MemoryManager::sweep() calling collect()\n");
   collect();
   m_sweeping = true;
   SCOPE_EXIT { m_sweeping = false; };
@@ -1128,8 +1128,8 @@ void MemoryManager::eagerGCCheck() {
 void BigHeap::reset() {
   TRACE(1, "BigHeap-reset: slabs %lu bigs %lu\n", m_slabs.size(),
         m_bigs.size());
-  FTRACE(1, "rewindable: {} ({})\n", m_rwc.stat(), m_rwc.percent());
-  m_rwc.reset();
+  FTRACE(1, "rewindable: {} ({})\n", m_lbcounter.stat(), m_lbcounter.percent());
+  m_lbcounter.reset();
   for (auto slab : m_slabs) {
     free(slab.ptr);
   }
@@ -1236,6 +1236,7 @@ void BigHeap::dumpMapBits() {
 void BigHeap::flush() {
   assert(empty());
   m_slabs = std::vector<ImmixBlock>{};
+  m_exps = std::vector<ImmixBlock>{};
   m_bigs = std::vector<BigNode*>{};
 }
 
@@ -1291,6 +1292,9 @@ MemBlock BigHeap::allocBig(size_t bytes, HeaderKind kind) {
   // else it is an explicit allocation, so use the special
   // lazy bump-pointer space
 
+  // log allocation occurred
+  if (debug) m_lbcounter.alloc();
+
   // set up bump pointer and limit
   if (!m_exp_cursor) {
     MemBlock block = allocExpSlab(kBlockSize);
@@ -1299,6 +1303,8 @@ MemBlock BigHeap::allocBig(size_t bytes, HeaderKind kind) {
   }
   // lazy bump
   if (m_exp_lag != 0) {
+    // log that we bumped the pointer
+    if (debug) m_lbcounter.bump();
     setMapBitSlowExp(m_exp_cursor); // mark live
     m_exp_cursor = (void*)(uintptr_t(m_exp_cursor) + m_exp_lag); // bump
   }
@@ -1328,7 +1334,6 @@ MemBlock BigHeap::allocBig(size_t bytes, HeaderKind kind) {
   FTRACE(2, "BigHeap::allocBig: BigMalloc {} -> {}\n", cap, n);
   
   return {n + 1, bytes};
-  //m_rwc.alloc(n, cap);
 }
 
 MemBlock BigHeap::callocBig(size_t nbytes) {
@@ -1512,16 +1517,15 @@ void BigHeap::freeBig(void* ptr) {
     return;
   }
   // explicit allocation
-  //m_rwc.dealloc(n);
 
   // if we were the last thing allocated, there is no lag anymore
   // just overwrite us on the next allocation
   if (n == m_exp_last) {
     m_exp_lag = 0;
-    FTRACE(2, "freeBig BigMalloc retreating! {}\n", n);
+    FTRACE(3, "freeBig BigMalloc retreating! {}\n", n);
   } else {
     // need to try and free ourself... no way to do that, just leak.
-    FTRACE(2, "freeBig BigMalloc leaking... {}\n", n);
+    FTRACE(3, "freeBig BigMalloc leaking... {}\n", n);
   }
 }
 
