@@ -348,24 +348,44 @@ struct ImmixBlock {
  * Rewind Counter - provides stats on rewind/lazy bump pointer allocation
  */
 struct LazyBumpCounter {
-  size_t bumps = 0;
-  size_t allocs = 0;
-  void alloc() {
+  size_t bumps = 0; // number of survivors
+  size_t allocs = 0; // number of allocations
+  size_t allocated = 0; // total allocated with normal bump ptr
+  size_t bumped = 0; // total allocated under lazy bump ptr
+  size_t dead = 0;
+  void alloc(size_t bytes) {
     allocs++;
+    allocated += bytes;
   }
-  void bump() { 
+  void bump(size_t bytes) { 
     bumps++;
+    bumped += bytes;
+  }
+  void died() {
+    dead++;
   }
   double percent() {
     if (bumps != 0) return (double)(allocs - bumps) / (double)allocs * 100;;
     return 0;
   }
   std::string stat() {
-    return std::to_string(allocs - bumps) + "/" +  std::to_string(allocs);
+    return std::to_string(allocs - bumps) + "/" +  std::to_string(allocs)
+      + " total alloc'd=" + std::to_string(allocated) + " in"
+      + std::to_string(bumped) + " space";
+  }
+
+  std::string immortals() {
+    return "immortals=" + std::to_string(allocs-dead)
+      + "/" + std::to_string(allocs) + " ("
+      + std::to_string((double)(allocs-dead) / (double)allocs)
+      + ")";
   }
   void reset() {
     bumps = 0;
     allocs = 0;
+    allocated = 0;
+    bumped = 0;
+    dead = 0;
   }
 
 };
@@ -378,7 +398,7 @@ struct LazyBumpCounter {
 struct BigHeap {
   BigHeap() {m_pos = -1;}
   bool empty() const {
-    return m_slabs.empty() && m_bigs.empty();
+    return m_slabs.empty() && m_exps.empty() && m_bigs.empty();
   }
 
   // return true if ptr points into one of the slabs
@@ -431,6 +451,8 @@ struct BigHeap {
   template<class Fn> void iterateSlabs(Fn);
   // iterate immix lines with line mark
   template<class Fn> void forEachLine(Fn);
+
+  size_t allocated = 0;
 
  protected:
   void enlist(BigNode*, HeaderKind kind, size_t size);

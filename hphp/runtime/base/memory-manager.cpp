@@ -740,6 +740,8 @@ void* MemoryManager::sequentialAllocate(void*& cursor, void* limit,
     // round to 16-byte alignment
     auto aligned_bytes = MemoryManager::align(bytes);
 
+    m_heap.allocated += aligned_bytes;
+
     void* p = cursor;
     cursor = (void*)(uintptr_t(cursor) + aligned_bytes);
 
@@ -1129,7 +1131,10 @@ void BigHeap::reset() {
   TRACE(1, "BigHeap-reset: slabs %lu bigs %lu\n", m_slabs.size(),
         m_bigs.size());
   FTRACE(1, "rewindable: {} ({})\n", m_lbcounter.stat(), m_lbcounter.percent());
+  FTRACE(1, "explicit percent of heap: {}\n", m_lbcounter.immortals());
   m_lbcounter.reset();
+  FTRACE(1, "total allocated: {}\n", allocated);
+  allocated = 0;
   for (auto slab : m_slabs) {
     free(slab.ptr);
   }
@@ -1277,7 +1282,8 @@ void BigHeap::enlist(BigNode* n, HeaderKind kind, size_t size) {
 }
 
 MemBlock BigHeap::allocBig(size_t bytes, HeaderKind kind) {
-  if (kind == HeaderKind::BigObj) {
+  allocated += MemoryManager::align(bytes);
+  if (kind == HeaderKind::BigObj || bytes >= kMaxMediumSize) {
 #ifdef USE_JEMALLOC
     auto n = static_cast<BigNode*>(mallocx(bytes + sizeof(BigNode), 0));
     auto cap = sallocx(n, 0);
@@ -1286,14 +1292,18 @@ MemBlock BigHeap::allocBig(size_t bytes, HeaderKind kind) {
     auto n = static_cast<BigNode*>(safe_malloc(cap));
 #endif
     enlist(n, kind, cap);
-    FTRACE(2, "BigHeap::allocBig: BigObj {} -> {}\n", bytes, n);
+    if (kind == HeaderKind::BigObj) {
+      FTRACE(2, "BigHeap::allocBig: BigObj {} -> {}\n", bytes, n);
+    } else {
+      FTRACE(2, "BigHeap::allocBig: Huge BigMalloc! {} -> {}\n", bytes, n);
+    }
     return {n + 1, cap - sizeof(BigNode)};
   }
   // else it is an explicit allocation, so use the special
   // lazy bump-pointer space
 
   // log allocation occurred
-  if (debug) m_lbcounter.alloc();
+  if (debug) m_lbcounter.alloc(MemoryManager::align(bytes));
 
   // set up bump pointer and limit
   if (!m_exp_cursor) {
@@ -1304,7 +1314,7 @@ MemBlock BigHeap::allocBig(size_t bytes, HeaderKind kind) {
   // lazy bump
   if (m_exp_lag != 0) {
     // log that we bumped the pointer
-    if (debug) m_lbcounter.bump();
+    if (debug) m_lbcounter.bump(MemoryManager::align(bytes));
     setMapBitSlowExp(m_exp_cursor); // mark live
     m_exp_cursor = (void*)(uintptr_t(m_exp_cursor) + m_exp_lag); // bump
   }
@@ -1517,6 +1527,7 @@ void BigHeap::freeBig(void* ptr) {
     return;
   }
   // explicit allocation
+  m_lbcounter.died();
 
   // if we were the last thing allocated, there is no lag anymore
   // just overwrite us on the next allocation
